@@ -119,6 +119,19 @@ public class GravitySDK {
             )
         }
     }
+    
+    public func getContentBySelector(
+        selector: String,
+        pageContext: PageContext
+    ) async throws -> ContentResponse {
+        let response = try await repository.chooseBySelector(
+            selector: selector,
+            options: options,
+            contentSettings: contentSettings,
+            pageContext: pageContext
+        )
+        return response
+    }
 
     private func handleCampaignIdsResponse(
         _ response: CampaignIdsResponse,
@@ -196,7 +209,7 @@ public class GravitySDK {
         return response
     }
 
-    internal func getContentBySelector(
+    internal func getContentBySelectorInternal(
         selector: String,
         pageContext: PageContext
     ) async throws -> ContentResponse {
