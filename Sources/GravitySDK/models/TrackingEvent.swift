@@ -100,7 +100,18 @@ public class RequestPushEvent: TrackingEvent {
 public class ProductImpressionEvent: TrackingEvent {
     public let slot: Slot
     public let content: CampaignContent
-    
+
+    public init(slot: Slot, content: CampaignContent, campaign: Campaign) {
+        self.slot = slot
+        self.content = content
+        super.init(campaign: campaign)
+    }
+}
+
+public class ProductClickEvent: TrackingEvent {
+    public let slot: Slot
+    public let content: CampaignContent
+
     public init(slot: Slot, content: CampaignContent, campaign: Campaign) {
         self.slot = slot
         self.content = content

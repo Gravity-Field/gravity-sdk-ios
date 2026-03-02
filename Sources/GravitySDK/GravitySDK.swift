@@ -8,7 +8,7 @@ public typealias GravityEventCallback = (TrackingEvent) -> Void
 public class GravitySDK {
     internal let apiKey: String
     internal let section: String
-    internal let gravityEventCallback: GravityEventCallback
+    private let gravityEventCallback: GravityEventCallback
     internal let productViewBuilder: ProductViewBuilder?
     internal let productFilter: ProductFilter?
 
@@ -59,8 +59,8 @@ public class GravitySDK {
         .unknown
 
     private let repository = GravityRepository.instance
-    // TODO: add contentEventService
-    // TODO: add productEventService
+    private let contentEventService = ContentEventService.instance
+    private let productEventService = ProductEventService.instance
 
     public func setOptions(
         options: Options?,
@@ -119,7 +119,7 @@ public class GravitySDK {
             )
         }
     }
-    
+
     public func getContentBySelector(
         selector: String,
         pageContext: PageContext
@@ -167,7 +167,8 @@ public class GravitySDK {
                 )
             }
 
-            guard await !viewController.isBeingDismissed,
+            guard viewController.view.window != nil,
+                await !viewController.isBeingDismissed,
                 await !viewController.isMovingFromParent
             else {
                 return
@@ -179,8 +180,51 @@ public class GravitySDK {
         }
     }
 
-    // TODO: Add sendContentEngagement
-    // TODO: Add sendProductEngagement
+    public func sendContentEngagement(engagement: ContentEngagement) {
+        switch engagement {
+        case let engagement as ContentImpressionEngagement:
+            contentEventService.sendContentImpression(
+                engagement.content,
+                engagement.campaign,
+                callbackTrackingEvent: false,
+            )
+        case let engagement as ContentVisibleImpressionEngagement:
+            contentEventService.sendContentVisibleImpression(
+                engagement.content,
+                engagement.campaign,
+                callbackTrackingEvent: false,
+            )
+        case let engagement as ContentCloseEngagement:
+            contentEventService.sendContentClosed(
+                engagement.content,
+                engagement.campaign,
+                callbackTrackingEvent: false,
+            )
+        default:
+            break
+        }
+    }
+
+    public func sendProductEngagement(engagement: ProductEngagement) {
+        switch engagement {
+        case let engagement as ProductClickEngagement:
+            productEventService.sendProductClick(
+                engagement.slot,
+                engagement.content,
+                engagement.campaign,
+                callbackTrackingEvent: false,
+            )
+        case let engagement as ProductVisibleImpressionEngagement:
+            productEventService.sendProductVisibleImpression(
+                engagement.slot,
+                engagement.content,
+                engagement.campaign,
+                callbackTrackingEvent: false,
+            )
+        default:
+            break
+        }
+    }
 
     internal func getContentByCampaignId(
         _ campaignId: String,
@@ -198,8 +242,10 @@ public class GravitySDK {
                 for payload in campaign.payload {
                     for content in payload.contents {
                         group.addTask {
-                            // TODO: Add contentEventService.sendContentLoaded
-                            // await self.contentEventService.sendContentLoaded(content, campaign)
+                            self.contentEventService.sendContentLoaded(
+                                content,
+                                campaign
+                            )
                         }
                     }
                 }
@@ -225,8 +271,10 @@ public class GravitySDK {
                 for payload in campaign.payload {
                     for content in payload.contents {
                         group.addTask {
-                            // TODO: Add contentEventService.sendContentLoaded
-                            // await self.contentEventService.sendContentLoaded(content, campaign)
+                            self.contentEventService.sendContentLoaded(
+                                content,
+                                campaign
+                            )
                         }
                     }
                 }
@@ -329,7 +377,7 @@ public class GravitySDK {
                 }
             )
         }
-        
+
         let fullScreenView = GravityBottomSheetContent(
             content: content,
             campaign: campaign,
@@ -370,7 +418,7 @@ public class GravitySDK {
         var controllerView: UIView? = nil
         var hostingController: UIHostingController<GravitySnackbarContent>? =
             nil
-        
+
         func dismiss() {
             controllerView?.removeFromSuperview()
         }
@@ -481,7 +529,9 @@ public class GravitySDK {
 
         case .requestPush:
             let notificationCenter = UNUserNotificationCenter.current()
-            notificationCenter.requestAuthorization(options: [.alert, .sound, .badge]) {
+            notificationCenter.requestAuthorization(options: [
+                .alert, .sound, .badge,
+            ]) {
                 granted,
                 error in
                 DispatchQueue.main.async {
@@ -518,8 +568,12 @@ public class GravitySDK {
         }
     }
 
-    private func callbackTrackingEvent(_ event: TrackingEvent) {
-
+    internal func callbackTrackingEvent(_ event: TrackingEvent) {
+        Task {
+            await MainActor.run {
+                gravityEventCallback(event)
+            }
+        }
     }
 
     private func getTopViewController() -> UIViewController? {

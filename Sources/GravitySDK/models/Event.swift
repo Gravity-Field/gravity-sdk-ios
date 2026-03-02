@@ -46,8 +46,8 @@ public struct Event: Decodable {
     }
 }
 
-public enum ProductAction: Decodable {
-    case pvisibleImpression
+public enum ProductAction: Decodable, Equatable {
+    case visibleImpression
     case click
     case unknown(String)
     
@@ -56,7 +56,7 @@ public enum ProductAction: Decodable {
         let rawValue = try container.decode(String.self)
         
         switch rawValue {
-        case "visible_impression": self = .pvisibleImpression
+        case "visible_impression": self = .visibleImpression
         case "click": self = .click
         default: self = .unknown(rawValue)
         }

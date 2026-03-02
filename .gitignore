@@ -7,6 +7,7 @@ DerivedData/
 .swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
 .netrc
 
-Example/*/build/
-Example/*/DerivedData/
 Example/*/*.xcworkspace/xcuserdata/
+
+CONTEXT.md
+.local-config/
