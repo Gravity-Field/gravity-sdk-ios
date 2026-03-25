@@ -91,8 +91,8 @@ struct GravitySnackbarContent: View {
                     )
                 }
                 .frame(maxWidth: .infinity)
-                .background(style.backgroundColor ?? Color.white)
-                .cornerRadius(style.cornerRadius ?? 0)
+                .background(style?.backgroundColor ?? Color.white)
+                .cornerRadius(style?.cornerRadius ?? 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .applyIf(onClick != nil) { view in
