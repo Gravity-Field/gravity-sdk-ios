@@ -8,6 +8,7 @@ public struct CampaignContent: Decodable {
     public let step: Int?
     public let variables: Variables?
     public let products: Products?
+    public let custom: CustomModel?
     public let events: [Event]?
 
     public init(
@@ -18,6 +19,7 @@ public struct CampaignContent: Decodable {
         step: Int?,
         variables: Variables? = nil,
         products: Products? = nil,
+        custom: CustomModel? = nil,
         events: [Event]? = nil
     ) {
         self.contentId = contentId
@@ -27,6 +29,7 @@ public struct CampaignContent: Decodable {
         self.step = step
         self.variables = variables
         self.products = products
+        self.custom = custom
         self.events = events
     }
 }
