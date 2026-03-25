@@ -34,7 +34,7 @@ public struct PageContext: Codable {
         self.location = location
         self.lng = lng
         self.pageNumber = pageNumber
-        self.referrer = lng
+        self.referrer = referrer
         self.utm = utm
         self.attributes = attributes
     }
