@@ -9,6 +9,8 @@ internal class GravityRepository {
 
     static let instance = GravityRepository()
 
+    private static let TAG = "Repository"
+
     private init() {}
 
     private let jsonEncoder: JSONEncoder = {
@@ -47,27 +49,32 @@ internal class GravityRepository {
         pageContext: PageContext,
         options: Options,
         customerUser: User?
-    ) async throws -> CampaignIdsResponse {
-        let requestBody = VisitRequest(
-            sec: GravitySDK.instance.section,
-            device: deviceUtils.getDevice(),
-            type: "screenview",
-            user: userForRequest(customerUser),
-            ctx: mixPageContextAttributes(pageContext),
-            options: options
-        )
+    ) async -> CampaignIdsResponse? {
+        do {
+            let requestBody = VisitRequest(
+                sec: GravitySDK.instance.section,
+                device: deviceUtils.getDevice(),
+                type: "screenview",
+                user: userForRequest(customerUser),
+                ctx: mixPageContextAttributes(pageContext),
+                options: options
+            )
 
-        let response: CampaignIdsResponse = try await performRequest(
-            endpoint: VISIT,
-            method: "POST",
-            body: requestBody
-        )
+            let response: CampaignIdsResponse = try await performRequest(
+                endpoint: VISIT,
+                method: "POST",
+                body: requestBody
+            )
 
-        saveUserIfNeeded(
-            customerUser: customerUser,
-            contentResponseUser: response.user
-        )
-        return response
+            saveUserIfNeeded(
+                customerUser: customerUser,
+                contentResponseUser: response.user
+            )
+            return response
+        } catch {
+            GravityLogger.e(Self.TAG, "visit failed: \(error.localizedDescription)", error)
+            return nil
+        }
     }
 
     func event(
@@ -75,27 +82,32 @@ internal class GravityRepository {
         pageContext: PageContext,
         options: Options,
         customerUser: User?
-    ) async throws -> CampaignIdsResponse {
-        let requestBody = EventRequest(
-            sec: GravitySDK.instance.section,
-            device: deviceUtils.getDevice(),
-            data: events,
-            user: userForRequest(customerUser),
-            ctx: mixPageContextAttributes(pageContext),
-            options: options
-        )
+    ) async -> CampaignIdsResponse? {
+        do {
+            let requestBody = EventRequest(
+                sec: GravitySDK.instance.section,
+                device: deviceUtils.getDevice(),
+                data: events,
+                user: userForRequest(customerUser),
+                ctx: mixPageContextAttributes(pageContext),
+                options: options
+            )
 
-        let response: CampaignIdsResponse = try await performRequest(
-            endpoint: EVENT,
-            method: "POST",
-            body: requestBody
-        )
+            let response: CampaignIdsResponse = try await performRequest(
+                endpoint: EVENT,
+                method: "POST",
+                body: requestBody
+            )
 
-        saveUserIfNeeded(
-            customerUser: customerUser,
-            contentResponseUser: response.user
-        )
-        return response
+            saveUserIfNeeded(
+                customerUser: customerUser,
+                contentResponseUser: response.user
+            )
+            return response
+        } catch {
+            GravityLogger.e(Self.TAG, "event failed: \(error.localizedDescription)", error)
+            return nil
+        }
     }
 
     func chooseByCampaignId(
@@ -104,32 +116,37 @@ internal class GravityRepository {
         contentSettings: ContentSettings,
         customerUser: User? = nil,
         pageContext: PageContext
-    ) async throws -> ContentResponse {
-        let requestBody = ContentRequest(
-            sec: GravitySDK.instance.section,
-            device: deviceUtils.getDevice(),
-            data: [
-                ByCampaignIdData(
-                    campaignId: campaignId,
-                    options: contentSettings
-                )
-            ],
-            user: userForRequest(customerUser),
-            ctx: mixPageContextAttributes(pageContext),
-            options: options,
-        )
+    ) async -> ContentResponse? {
+        do {
+            let requestBody = ContentRequest(
+                sec: GravitySDK.instance.section,
+                device: deviceUtils.getDevice(),
+                data: [
+                    ByCampaignIdData(
+                        campaignId: campaignId,
+                        options: contentSettings
+                    )
+                ],
+                user: userForRequest(customerUser),
+                ctx: mixPageContextAttributes(pageContext),
+                options: options,
+            )
 
-        let response: ContentResponse = try await performRequest(
-            endpoint: CHOOSE,
-            method: "POST",
-            body: requestBody
-        )
+            let response: ContentResponse = try await performRequest(
+                endpoint: CHOOSE,
+                method: "POST",
+                body: requestBody
+            )
 
-        saveUserIfNeeded(
-            customerUser: customerUser,
-            contentResponseUser: response.user
-        )
-        return response
+            saveUserIfNeeded(
+                customerUser: customerUser,
+                contentResponseUser: response.user
+            )
+            return response
+        } catch {
+            GravityLogger.e(Self.TAG, "chooseByCampaignId failed: \(error)", error)
+            return nil
+        }
     }
 
     func chooseBySelector(
@@ -138,32 +155,37 @@ internal class GravityRepository {
         contentSettings: ContentSettings,
         customerUser: User? = nil,
         pageContext: PageContext
-    ) async throws -> ContentResponse {
-        let requestBody = ContentRequest(
-            sec: GravitySDK.instance.section,
-            device: deviceUtils.getDevice(),
-            data: [
-                BySelectorData(
-                    selector: selector,
-                    options: contentSettings
-                )
-            ],
-            user: userForRequest(customerUser),
-            ctx: mixPageContextAttributes(pageContext),
-            options: options,
-        )
+    ) async -> ContentResponse? {
+        do {
+            let requestBody = ContentRequest(
+                sec: GravitySDK.instance.section,
+                device: deviceUtils.getDevice(),
+                data: [
+                    BySelectorData(
+                        selector: selector,
+                        options: contentSettings
+                    )
+                ],
+                user: userForRequest(customerUser),
+                ctx: mixPageContextAttributes(pageContext),
+                options: options,
+            )
 
-        let response: ContentResponse = try await performRequest(
-            endpoint: CHOOSE,
-            method: "POST",
-            body: requestBody
-        )
+            let response: ContentResponse = try await performRequest(
+                endpoint: CHOOSE,
+                method: "POST",
+                body: requestBody
+            )
 
-        saveUserIfNeeded(
-            customerUser: customerUser,
-            contentResponseUser: response.user
-        )
-        return response
+            saveUserIfNeeded(
+                customerUser: customerUser,
+                contentResponseUser: response.user
+            )
+            return response
+        } catch {
+            GravityLogger.e(Self.TAG, "chooseBySelector failed: \(error)", error)
+            return nil
+        }
     }
 
     func trackEngagementEvent(urls: [String]) async throws {
@@ -171,7 +193,11 @@ internal class GravityRepository {
             for url in urls {
                 if let url = URL(string: url) {
                     group.addTask {
-                        _ = try? await self.urlSession.data(from: url)
+                        do {
+                            _ = try await self.urlSession.data(from: url)
+                        } catch {
+                            GravityLogger.e(Self.TAG, "trackEngagementEvent failed: \(error)", error)
+                        }
                     }
                 }
             }

@@ -9,6 +9,7 @@ struct GravitySDKDemoApp: App {
             apiKey:"",
             section: "",
             gravityEventCallback: { event in },
+            logLevel: LogLevel.debug
         )
     }
 

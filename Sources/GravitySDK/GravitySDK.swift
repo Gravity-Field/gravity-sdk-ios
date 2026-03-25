@@ -40,8 +40,10 @@ public class GravitySDK {
         section: String,
         gravityEventCallback: @escaping GravityEventCallback,
         productViewBuilder: ProductViewBuilder? = nil,
-        productFilter: ProductFilter? = nil
+        productFilter: ProductFilter? = nil,
+        logLevel: LogLevel = .none
     ) {
+        GravityLogger.configure(logLevel)
         _instance = GravitySDK(
             apiKey: apiKey,
             section: section,
@@ -87,16 +89,20 @@ public class GravitySDK {
         viewController: UIViewController? = nil,
     ) {
         Task {
-            let campaignIdsResponse = try await repository.visit(
-                pageContext: pageContext,
-                options: options,
-                customerUser: user
-            )
-            try await handleCampaignIdsResponse(
-                campaignIdsResponse,
-                pageContext,
-                viewController
-            )
+            do {
+                guard
+                    let campaignIdsResponse = await repository.visit(
+                        pageContext: pageContext,
+                        options: options,
+                        customerUser: user
+                    )
+                else { return }
+                try await handleCampaignIdsResponse(
+                    campaignIdsResponse,
+                    pageContext,
+                    viewController
+                )
+            } catch {}
         }
     }
 
@@ -106,30 +112,36 @@ public class GravitySDK {
         viewController: UIViewController? = nil,
     ) {
         Task {
-            let campaignIdsResponse = try await repository.event(
-                events: events,
-                pageContext: pageContext,
-                options: options,
-                customerUser: user
-            )
-            try await handleCampaignIdsResponse(
-                campaignIdsResponse,
-                pageContext,
-                viewController
-            )
+            do {
+                guard
+                    let campaignIdsResponse = await repository.event(
+                        events: events,
+                        pageContext: pageContext,
+                        options: options,
+                        customerUser: user
+                    )
+                else { return }
+                try await handleCampaignIdsResponse(
+                    campaignIdsResponse,
+                    pageContext,
+                    viewController
+                )
+            } catch {}
         }
     }
 
     public func getContentBySelector(
         selector: String,
         pageContext: PageContext
-    ) async throws -> ContentResponse {
-        let response = try await repository.chooseBySelector(
-            selector: selector,
-            options: options,
-            contentSettings: contentSettings,
-            pageContext: pageContext
-        )
+    ) async -> ContentResponse? {
+        guard
+            let response = await repository.chooseBySelector(
+                selector: selector,
+                options: options,
+                contentSettings: contentSettings,
+                pageContext: pageContext
+            )
+        else { return nil }
 
         await withTaskGroup(of: Void.self) { group in
             for campaign in response.data {
@@ -164,10 +176,12 @@ public class GravitySDK {
         }
 
         for campaignId in sortedByPriority {
-            let result = try await getContentByCampaignId(
-                campaignId.campaignId,
-                pageContext
-            )
+            guard
+                let result = await getContentByCampaignId(
+                    campaignId.campaignId,
+                    pageContext
+                )
+            else { continue }
 
             guard let campaign = result.data.first,
                 let payload = campaign.payload.first,
@@ -245,13 +259,15 @@ public class GravitySDK {
     public func getContentByCampaignId(
         _ campaignId: String,
         _ pageContext: PageContext
-    ) async throws -> ContentResponse {
-        let response = try await repository.chooseByCampaignId(
-            campaignId: campaignId,
-            options: options,
-            contentSettings: contentSettings,
-            pageContext: pageContext
-        )
+    ) async -> ContentResponse? {
+        guard
+            let response = await repository.chooseByCampaignId(
+                campaignId: campaignId,
+                options: options,
+                contentSettings: contentSettings,
+                pageContext: pageContext
+            )
+        else { return nil }
 
         await withTaskGroup(of: Void.self) { group in
             for campaign in response.data {
