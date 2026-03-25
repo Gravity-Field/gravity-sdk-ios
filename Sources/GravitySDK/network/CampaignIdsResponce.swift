@@ -1,5 +1,5 @@
 struct CampaignIdsResponse: Codable {
-    let user: User
+    let user: User?
     let campaigns: [CampaignId]
 }
 
