@@ -130,6 +130,22 @@ public class GravitySDK {
             contentSettings: contentSettings,
             pageContext: pageContext
         )
+
+        await withTaskGroup(of: Void.self) { group in
+            for campaign in response.data {
+                for payload in campaign.payload {
+                    for content in payload.contents {
+                        group.addTask {
+                            self.contentEventService.sendContentLoaded(
+                                content,
+                                campaign
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         return response
     }
 
@@ -226,41 +242,12 @@ public class GravitySDK {
         }
     }
 
-    internal func getContentByCampaignId(
+    public func getContentByCampaignId(
         _ campaignId: String,
         _ pageContext: PageContext
     ) async throws -> ContentResponse {
         let response = try await repository.chooseByCampaignId(
             campaignId: campaignId,
-            options: options,
-            contentSettings: contentSettings,
-            pageContext: pageContext
-        )
-
-        await withTaskGroup(of: Void.self) { group in
-            for campaign in response.data {
-                for payload in campaign.payload {
-                    for content in payload.contents {
-                        group.addTask {
-                            self.contentEventService.sendContentLoaded(
-                                content,
-                                campaign
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        return response
-    }
-
-    internal func getContentBySelectorInternal(
-        selector: String,
-        pageContext: PageContext
-    ) async throws -> ContentResponse {
-        let response = try await repository.chooseBySelector(
-            selector: selector,
             options: options,
             contentSettings: contentSettings,
             pageContext: pageContext
