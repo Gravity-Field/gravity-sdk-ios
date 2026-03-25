@@ -6,17 +6,17 @@ public struct CampaignContent: Decodable {
     public let deliveryMethod: DeliveryMethod
     public let contentType: String
     public let step: Int?
-    public let variables: Variables
+    public let variables: Variables?
     public let products: Products?
     public let events: [Event]?
-    
+
     public init(
         contentId: String,
         templateSystemName: TemplateSystemName? = nil,
         deliveryMethod: DeliveryMethod,
         contentType: String,
         step: Int?,
-        variables: Variables,
+        variables: Variables? = nil,
         products: Products? = nil,
         events: [Event]? = nil
     ) {

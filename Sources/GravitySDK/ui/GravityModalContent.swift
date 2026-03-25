@@ -9,7 +9,7 @@ struct GravityModalContent: View {
     @State private var contentHeight: CGFloat = 0
 
     private var frameUi: FrameUI? {
-        content.variables.frameUI
+        content.variables?.frameUI
     }
 
     private var container: Container? {

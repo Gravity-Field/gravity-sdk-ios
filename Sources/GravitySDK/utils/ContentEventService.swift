@@ -13,7 +13,7 @@ internal class ContentEventService {
         _ campaign: Campaign,
         callbackTrackingEvent: Bool = true
     ) {
-        guard let onLoad = content.variables.onLoad else { return }
+        guard let onLoad = content.variables?.onLoad else { return }
         trackEvent(
             contentAction: onLoad,
             content: content,
@@ -27,7 +27,7 @@ internal class ContentEventService {
         _ campaign: Campaign,
         callbackTrackingEvent: Bool = true
     ) {
-        guard let onImpression = content.variables.onImpression else { return }
+        guard let onImpression = content.variables?.onImpression else { return }
         trackEvent(
             contentAction: onImpression,
             content: content,
@@ -41,7 +41,7 @@ internal class ContentEventService {
         _ campaign: Campaign,
         callbackTrackingEvent: Bool = true
     ) {
-        guard let onVisibleImpression = content.variables.onVisibleImpression else { return }
+        guard let onVisibleImpression = content.variables?.onVisibleImpression else { return }
         trackEvent(
             contentAction: onVisibleImpression,
             content: content,
@@ -55,7 +55,7 @@ internal class ContentEventService {
         _ campaign: Campaign,
         callbackTrackingEvent: Bool = true
     ) {
-        guard let onClose = content.variables.onClose else { return }
+        guard let onClose = content.variables?.onClose else { return }
         trackEvent(
             contentAction: onClose,
             content: content,

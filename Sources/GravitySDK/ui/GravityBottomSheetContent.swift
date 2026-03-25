@@ -8,7 +8,7 @@ struct GravityBottomSheetContent: View {
     let onDismiss: () -> Void
 
     private var frameUi: FrameUI? {
-        content.variables.frameUI
+        content.variables?.frameUI
     }
     
     private var container: Container? {

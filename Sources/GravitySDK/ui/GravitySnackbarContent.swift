@@ -11,7 +11,7 @@ struct GravitySnackbarContent: View {
     @State var showSnackbar = false
 
     private var frameUi: FrameUI? {
-        content.variables.frameUI
+        content.variables?.frameUI
     }
 
     private var container: Container? {
@@ -31,7 +31,7 @@ struct GravitySnackbarContent: View {
     }
 
     private var elements: [Element] {
-        content.variables.elements ?? []
+        content.variables?.elements ?? []
     }
 
     private var texts: [Element] {

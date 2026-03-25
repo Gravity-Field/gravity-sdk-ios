@@ -7,7 +7,7 @@ struct GravityElements: View {
     let onClickCallback: (OnClickModel) -> Void
 
     var body: some View {
-        let elements = content.variables.elements ?? []
+        let elements = content.variables?.elements ?? []
         
         return ForEach(elements.indices, id: \.self) { index in
             let element = elements[index]

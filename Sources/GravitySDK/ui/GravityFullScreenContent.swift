@@ -6,7 +6,7 @@ struct GravityFullScreenContent: View {
     let onClickCallback: (OnClickModel) -> Void
     
     private var frameUi: FrameUI? {
-        content.variables.frameUI
+        content.variables?.frameUI
     }
     
     private var container: Container? {
