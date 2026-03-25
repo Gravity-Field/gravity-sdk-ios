@@ -31,7 +31,7 @@ struct GravitySnackbarContent: View {
     }
 
     private var elements: [Element] {
-        content.variables.elements
+        content.variables.elements ?? []
     }
 
     private var texts: [Element] {

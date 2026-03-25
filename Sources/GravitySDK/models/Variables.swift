@@ -2,15 +2,15 @@ import Foundation
 
 public struct Variables: Decodable {
     public let frameUI: FrameUI?
-    public let elements: [Element]
+    public let elements: [Element]?
     public let onLoad: ContentActionModel?
     public let onImpression: ContentActionModel?
     public let onVisibleImpression: ContentActionModel?
     public let onClose: ContentActionModel?
-    
+
     public init(
         frameUI: FrameUI? = nil,
-        elements: [Element] = [],
+        elements: [Element]? = nil,
         onLoad: ContentActionModel? = nil,
         onImpression: ContentActionModel? = nil,
         onVisibleImpression: ContentActionModel? = nil,
