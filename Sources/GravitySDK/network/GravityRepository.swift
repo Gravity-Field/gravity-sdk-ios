@@ -38,10 +38,6 @@ internal class GravityRepository {
         let configuration = URLSessionConfiguration.default
         configuration.timeoutIntervalForRequest = 5.0
         configuration.timeoutIntervalForResource = 5.0
-        configuration.httpAdditionalHeaders = [
-            "Content-Type": "application/json",
-            "Authorization": "Bearer \(GravitySDK.instance.apiKey)",
-        ]
         return URLSession(configuration: configuration)
     }()
 
@@ -72,7 +68,7 @@ internal class GravityRepository {
             )
             return response
         } catch {
-            GravityLogger.e(Self.TAG, "visit failed: \(error.localizedDescription)", error)
+            GravityLogger.e(Self.TAG, "visit failed: \(error)")
             return nil
         }
     }
@@ -105,7 +101,7 @@ internal class GravityRepository {
             )
             return response
         } catch {
-            GravityLogger.e(Self.TAG, "event failed: \(error.localizedDescription)", error)
+            GravityLogger.e(Self.TAG, "event failed: \(error)")
             return nil
         }
     }
@@ -144,7 +140,7 @@ internal class GravityRepository {
             )
             return response
         } catch {
-            GravityLogger.e(Self.TAG, "chooseByCampaignId failed: \(error)", error)
+            GravityLogger.e(Self.TAG, "chooseByCampaignId failed: \(error)")
             return nil
         }
     }
@@ -183,7 +179,7 @@ internal class GravityRepository {
             )
             return response
         } catch {
-            GravityLogger.e(Self.TAG, "chooseBySelector failed: \(error)", error)
+            GravityLogger.e(Self.TAG, "chooseBySelector failed: \(error)")
             return nil
         }
     }
@@ -194,9 +190,9 @@ internal class GravityRepository {
                 if let url = URL(string: url) {
                     group.addTask {
                         do {
-                            _ = try await self.urlSession.data(from: url)
+                            try await self.performRequest(url: url, method: "GET", body: nil)
                         } catch {
-                            GravityLogger.e(Self.TAG, "trackEngagementEvent failed: \(error)", error)
+                            GravityLogger.e(Self.TAG, "trackEngagementEvent failed: \(error)")
                         }
                     }
                 }
@@ -271,12 +267,43 @@ internal class GravityRepository {
         method: String,
         body: Encodable? = nil
     ) async throws -> T {
+        let (data, response) = try await makeRequest(url: url, method: method, body: body)
+        
+        do {
+            return try jsonDecoder.decode(T.self, from: data)
+        } catch {
+            throw NetworkError.decodingError(error)
+        }
+    }
+
+    private func performRequest(
+        url: URL,
+        method: String,
+        body: Encodable? = nil
+    ) async throws {
+        _ = try await makeRequest(url: url, method: method, body: body)
+    }
+
+    private func makeRequest(
+        url: URL,
+        method: String,
+        body: Encodable? = nil
+    ) async throws -> (Data, HTTPURLResponse) {
         var request = URLRequest(url: url)
         request.httpMethod = method
+        
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(GravitySDK.instance.apiKey)", forHTTPHeaderField: "Authorization")
 
         if let body = body {
-            request.httpBody = try jsonEncoder.encode(body)
+            do {
+                request.httpBody = try jsonEncoder.encode(body)
+            } catch {
+                throw NetworkError.encodingError(error)
+            }
         }
+
+        logHttpRequest(request: request)
 
         let (data, response) = try await urlSession.data(for: request)
 
@@ -284,15 +311,84 @@ internal class GravityRepository {
             throw NetworkError.invalidResponse
         }
 
+        logHttpResponse(response: httpResponse, data: data, method: method)
+
         guard (200...299).contains(httpResponse.statusCode) else {
             throw NetworkError.httpError(statusCode: httpResponse.statusCode)
         }
+        
+        return (data, httpResponse)
+    }
 
-        do {
-            return try jsonDecoder.decode(T.self, from: data)
-        } catch {
-            throw NetworkError.decodingError(error)
+    private func logHttpRequest(request: URLRequest) {
+        let url = request.url
+        let method = request.httpMethod
+        let bodyData = request.httpBody
+        
+        var logMessage = "REQUEST: \(url?.absoluteString ?? "nil")\n"
+        logMessage += "METHOD: \(method ?? "nil")\n"
+
+        logMessage += "COMMON HEADERS\n"
+        if let headers = request.allHTTPHeaderFields {
+            let sortedKeys = headers.keys.sorted { $0.lowercased() < $1.lowercased() }
+            for key in sortedKeys {
+                if let value = headers[key] {
+                    logMessage += "-> \(key): \(value)\n"
+                }
+            }
         }
+
+        logMessage += "CONTENT HEADERS\n"
+        if let headers = request.allHTTPHeaderFields {
+            if let contentType = headers["Content-Type"] {
+                logMessage += "-> Content-Type: \(contentType)\n"
+            }
+            if let contentLength = bodyData?.count {
+                logMessage += "-> Content-Length: \(contentLength)\n"
+            }
+        }
+
+        if let bodyData = bodyData {
+            if let jsonString = String(data: bodyData, encoding: .utf8) {
+                let contentType = request.allHTTPHeaderFields?["Content-Type"] ?? "nil"
+                logMessage += "BODY Content-Type: \(contentType)\n"
+                logMessage += "BODY START\n"
+                logMessage += "\(jsonString)\n"
+                logMessage += "BODY END"
+            } else {
+                logMessage += "BODY Content-Type: application/json\n"
+                logMessage += "BODY START\n"
+                logMessage += "[non-UTF8 data]\n"
+                logMessage += "BODY END"
+            }
+        } else {
+            logMessage += "BODY: [empty]"
+        }
+
+        GravityLogger.d(prefix: "HTTP", logMessage)
+    }
+
+    private func logHttpResponse(response: HTTPURLResponse, data: Data, method: String) {
+        var logMessage = "RESPONSE: \(response.statusCode) \(HTTPURLResponse.localizedString(forStatusCode: response.statusCode))\n"
+        logMessage += "METHOD: \(method)\n"
+        logMessage += "FROM: \(response.url?.absoluteString  ?? "nil")\n"
+        
+        logMessage += "COMMON HEADERS\n"
+        for (key, value) in response.allHeaderFields {
+            logMessage += "-> \(key): \(value)\n"
+        }
+        
+        if let jsonString = String(data: data, encoding: .utf8) {
+            let contentType = response.allHeaderFields["Content-Type"] as? String ?? "nil"
+            logMessage += "BODY Content-Type: \(contentType)\n"
+            logMessage += "BODY START\n"
+            logMessage += "\(jsonString)\n"
+            logMessage += "BODY END"
+        } else {
+            logMessage += "BODY: [empty or non-UTF8]"
+        }
+        
+        GravityLogger.d(prefix: "HTTP", logMessage)
     }
 
     private struct VisitRequest: Encodable {
@@ -335,7 +431,7 @@ internal class GravityRepository {
     }
 }
 
-enum NetworkError: Error {
+enum NetworkError: Error, LocalizedError {
     case invalidResponse
     case httpError(statusCode: Int)
     case decodingError(Error)
@@ -348,9 +444,9 @@ enum NetworkError: Error {
         case .httpError(let statusCode):
             return "HTTP error: \(statusCode)"
         case .decodingError(let error):
-            return "Failed to decode response: \(error.localizedDescription)"
+            return "Failed to decode response: \(error)"
         case .encodingError(let error):
-            return "Failed to encode request: \(error.localizedDescription)"
+            return "Failed to encode request: \(error)"
         }
     }
 }
