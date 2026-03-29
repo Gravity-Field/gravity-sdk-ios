@@ -431,13 +431,13 @@ internal class GravityRepository {
     }
 }
 
-enum NetworkError: Error, LocalizedError {
+enum NetworkError: Error, CustomStringConvertible {
     case invalidResponse
     case httpError(statusCode: Int)
     case decodingError(Error)
     case encodingError(Error)
 
-    var errorDescription: String? {
+    var description: String {
         switch self {
         case .invalidResponse:
             return "Invalid response from server"
