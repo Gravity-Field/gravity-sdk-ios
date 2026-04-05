@@ -47,8 +47,7 @@ final class DeviceUtils {
         
         let contextAttributes = [
             "app_version": "\(version)+\(buildNumber)",
-            // TODO: SDK version
-            "sdk_version": "0.0.1",
+            "sdk_version": GravitySDKInfo.version,
             "app_platform": "iOS",
         ]
         return contextAttributes
