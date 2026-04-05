@@ -228,10 +228,11 @@ internal class GravityRepository {
             data: pageContext.data,
             location: pageContext.location,
             lng: pageContext.lng,
+            pageNumber: pageContext.pageNumber,
+            referrer: pageContext.referrer,
             utm: pageContext.utm,
             attributes: attributes
         )
-
     }
 
     private func saveUserIfNeeded(
