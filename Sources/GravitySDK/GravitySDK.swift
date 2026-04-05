@@ -166,8 +166,13 @@ public class GravitySDK {
         _ pageContext: PageContext,
         _ viewController: UIViewController? = nil
     ) async throws {
-        guard let viewController = viewController ?? self.getTopViewController()
-        else {
+        let targetViewController: UIViewController?
+        if let viewController {
+            targetViewController = viewController
+        } else {
+            targetViewController = await self.getTopViewController()
+        }
+        guard let targetViewController = targetViewController else {
             return
         }
 
@@ -197,16 +202,11 @@ public class GravitySDK {
                 )
             }
 
-            guard viewController.view.window != nil,
-                await !viewController.isBeingDismissed,
-                await !viewController.isMovingFromParent
-            else {
+            guard await isViewControllerActive(targetViewController) else {
                 return
             }
 
-            await MainActor.run {
-                showBackendContent(viewController, content, campaign)
-            }
+            await showBackendContent(targetViewController, content, campaign)
         }
     }
 
@@ -287,7 +287,7 @@ public class GravitySDK {
         return response
     }
 
-    public func showBackendContent(
+    @MainActor public func showBackendContent(
         _ viewController: UIViewController,
         _ content: CampaignContent,
         _ campaign: Campaign,
@@ -302,7 +302,7 @@ public class GravitySDK {
         }
     }
 
-    private func showFullScreen(
+    @MainActor private func showFullScreen(
         _ content: CampaignContent,
         _ campaign: Campaign,
         _ viewController: UIViewController
@@ -330,7 +330,7 @@ public class GravitySDK {
         viewController.present(hostingController, animated: true)
     }
 
-    private func showModal(
+    @MainActor private func showModal(
         _ content: CampaignContent,
         _ campaign: Campaign,
         _ viewController: UIViewController
@@ -361,7 +361,7 @@ public class GravitySDK {
         viewController.present(hostingController, animated: true)
     }
 
-    private func showBottomSheet(
+    @MainActor private func showBottomSheet(
         _ content: CampaignContent,
         _ campaign: Campaign,
         _ viewController: UIViewController,
@@ -410,7 +410,7 @@ public class GravitySDK {
         }
     }
 
-    private func showSnackbar(
+    @MainActor private func showSnackbar(
         _ content: CampaignContent,
         _ campaign: Campaign,
         _ viewController: UIViewController,
@@ -579,7 +579,13 @@ public class GravitySDK {
         }
     }
 
-    private func getTopViewController() -> UIViewController? {
+    @MainActor private func isViewControllerActive(_ viewController: UIViewController) -> Bool {
+        viewController.view.window != nil
+            && !viewController.isBeingDismissed
+            && !viewController.isMovingFromParent
+    }
+
+    @MainActor private func getTopViewController() -> UIViewController? {
         guard
             let windowScene = UIApplication.shared.connectedScenes.first
                 as? UIWindowScene,
