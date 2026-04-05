@@ -58,6 +58,8 @@ internal class ProductEventService {
                     switch action {
                     case .visibleImpression:
                         trackingEvent = ProductImpressionEvent(slot: slot, content: content, campaign: campaign)
+                    case .click:
+                        trackingEvent = ProductClickEvent(slot: slot, content: content, campaign: campaign)
                     default:
                         trackingEvent = nil
                     }
