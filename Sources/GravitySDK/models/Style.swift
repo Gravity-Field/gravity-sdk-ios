@@ -212,14 +212,7 @@ public enum GravityContentScale: String, Codable, Equatable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
         let rawValue = try container.decode(String.self)
-        if let value = GravityContentScale(rawValue: rawValue) {
-            self = value
-        } else {
-            throw DecodingError.dataCorruptedError(
-                in: container,
-                debugDescription: "Invalid GravityContentScale value: \(rawValue)"
-            )
-        }
+        self = GravityContentScale(rawValue: rawValue) ?? .fit
     }
 }
 
@@ -231,14 +224,7 @@ public enum GravityContentAlignment: String, Codable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
         let rawValue = try container.decode(String.self)
-        if let value = GravityContentAlignment(rawValue: rawValue) {
-            self = value
-        } else {
-            throw DecodingError.dataCorruptedError(
-                in: container,
-                debugDescription: "Invalid GravityContentAlignment value: \(rawValue)"
-            )
-        }
+        self = GravityContentAlignment(rawValue: rawValue) ?? .start
     }
 
 
@@ -302,14 +288,7 @@ public enum GravityLayoutWidth: String, Codable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
         let rawValue = try container.decode(String.self)
-        if let value = GravityLayoutWidth(rawValue: rawValue) {
-            self = value
-        } else {
-            throw DecodingError.dataCorruptedError(
-                in: container,
-                debugDescription: "Invalid GravityLayoutWidth value: \(rawValue)"
-            )
-        }
+        self = GravityLayoutWidth(rawValue: rawValue) ?? .matchParent
     }
 }
 

@@ -13,8 +13,8 @@ final class DeviceUtils {
 
     func getDevice() -> Device {
         return Device(
-            id: getDeviceId(),
             userAgent: userAgent,
+            id: getDeviceId(),
             permission: GravitySDK.instance.notificationPermissionStatus,
             tracking: "notSupported"
         )

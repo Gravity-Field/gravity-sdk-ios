@@ -34,6 +34,20 @@ struct ContentView: View {
                     )
                 }
 
+                Button("Get content by selector") {
+                    Task{
+                        let response = await GravitySDK.instance.getContentBySelector(
+                            selector: "sdk_cart_reco",
+                            pageContext: PageContext(
+                                type: .cart,
+                                data: [],
+                                location: "homepage",
+                            )
+                        )
+                        print("response: \(String(describing: response))")
+                    }
+                }
+
             }.frame(maxHeight: .infinity, alignment: .top)
                 .padding()
         }

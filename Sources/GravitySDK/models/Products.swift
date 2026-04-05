@@ -38,11 +38,10 @@ public struct Slot: Decodable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        
-        let itemData = try container.decode(Data.self, forKey: .item)
-        let itemJson = try JSONSerialization.jsonObject(with: itemData, options: [])
-        self.item = itemJson as? [String: Any?] ?? [:]
-        
+
+        let itemContainer = try container.decode([String: JSONAny].self, forKey: .item)
+        self.item = itemContainer.mapValues { $0.value }
+
         self.fallback = try container.decode(Bool.self, forKey: .fallback)
         self.strId = try container.decode(Int.self, forKey: .strId)
         self.slotId = try container.decodeIfPresent(String.self, forKey: .slotId)

@@ -1,11 +1,11 @@
 import Foundation
 
 public struct Campaign: Decodable {
-    public let selector: String
+    public let selector: String?
     public let payload: [CampaignVariation]
     
     public init(
-        selector: String,
+        selector: String? = nil,
         payload: [CampaignVariation] = []
     ) {
         self.selector = selector

@@ -14,4 +14,15 @@ public struct Close: Decodable {
         self.image = image
         self.onClick = onClick
     }
+
+    enum CodingKeys: String, CodingKey {
+        case style, image, onClick
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        style = (try? container.decodeIfPresent(Style.self, forKey: .style)) ?? Style.empty
+        image = try container.decodeIfPresent(String.self, forKey: .image)
+        onClick = try container.decodeIfPresent(OnClickModel.self, forKey: .onClick)
+    }
 }

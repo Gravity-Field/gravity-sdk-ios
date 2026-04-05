@@ -20,6 +20,19 @@ public struct Element: Decodable {
         self.onClick = onClick
         self.style = style
     }
+
+    enum CodingKeys: String, CodingKey {
+        case type, text, src, onClick, style
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        type = try container.decode(ElementType.self, forKey: .type)
+        text = try container.decodeIfPresent(String.self, forKey: .text)
+        src = try container.decodeIfPresent(String.self, forKey: .src)
+        onClick = try container.decodeIfPresent(OnClickModel.self, forKey: .onClick)
+        style = try container.decodeIfPresent(Style.self, forKey: .style) ?? Style.empty
+    }
 }
 
 public enum ElementType: Decodable, Equatable {
@@ -55,7 +68,7 @@ public struct OnClickModel: Decodable {
     public let url: String?
     public let type: FollowUrlType?
     public let deeplink: String?
-    public let closeOnClick: Bool?
+    public let closeOnClick: Bool
     
     public init(
         action: Action,
@@ -64,7 +77,7 @@ public struct OnClickModel: Decodable {
         url: String? = nil,
         type: FollowUrlType? = nil,
         deeplink: String? = nil,
-        closeOnClick: Bool? = nil
+        closeOnClick: Bool = true
     ) {
         self.action = action
         self.copyData = copyData
@@ -73,6 +86,21 @@ public struct OnClickModel: Decodable {
         self.type = type
         self.deeplink = deeplink
         self.closeOnClick = closeOnClick
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case action, copyData, step, url, type, deeplink, closeOnClick
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        action = try container.decode(Action.self, forKey: .action)
+        copyData = try container.decodeIfPresent(String.self, forKey: .copyData)
+        step = try container.decodeIfPresent(Int.self, forKey: .step)
+        url = try container.decodeIfPresent(String.self, forKey: .url)
+        type = try container.decodeIfPresent(FollowUrlType.self, forKey: .type)
+        deeplink = try container.decodeIfPresent(String.self, forKey: .deeplink)
+        closeOnClick = try container.decodeIfPresent(Bool.self, forKey: .closeOnClick) ?? true
     }
 }
 
