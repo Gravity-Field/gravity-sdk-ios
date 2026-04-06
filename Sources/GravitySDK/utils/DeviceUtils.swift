@@ -11,6 +11,10 @@ final class DeviceUtils {
     private var userAgent: String = ""
     private(set) var contextAttributes: [String: String] = [:]
 
+    func getPlatformVersion() -> String {
+        return "iOS \(UIDevice.current.systemVersion)"
+    }
+
     func getDevice() -> Device {
         return Device(
             userAgent: userAgent,

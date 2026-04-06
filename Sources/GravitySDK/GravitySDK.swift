@@ -34,6 +34,8 @@ public class GravitySDK {
         }
         return instance
     }
+    
+    private static let TAG = "SDK"
 
     public static func initialize(
         apiKey: String,
@@ -53,7 +55,7 @@ public class GravitySDK {
         )
     }
 
-    private var user: User?
+    internal var user: User?
     private var options = Options()
     private var contentSettings = ContentSettings()
     internal var proxyUrl: String?
@@ -102,7 +104,9 @@ public class GravitySDK {
                     pageContext,
                     viewController
                 )
-            } catch {}
+            } catch {
+                GravityLogger.e(Self.TAG, "trackView error:  \(error)")
+            }
         }
     }
 
@@ -126,7 +130,9 @@ public class GravitySDK {
                     pageContext,
                     viewController
                 )
-            } catch {}
+            } catch {
+                GravityLogger.e(Self.TAG, "triggerEvent error:  \(error)")
+            }
         }
     }
 

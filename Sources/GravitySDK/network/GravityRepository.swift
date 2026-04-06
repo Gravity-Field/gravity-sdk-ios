@@ -200,6 +200,41 @@ internal class GravityRepository {
         }
     }
 
+    func sendErrorMessage(
+        message: String,
+        stacktrace: String
+    ) async {
+        let customerUser = GravitySDK.instance.user
+        let uid: String
+        let ses: String
+        if let customerUser = customerUser {
+            uid = customerUser.custom ?? ""
+            ses = customerUser.ses ?? ""
+        } else {
+            uid = userIdCache ?? ""
+            ses = sessionIdCache ?? ""
+        }
+        let sec = GravitySDK.instance.section
+
+        let logMessage = LogMessage(
+            message: message,
+            level: .error,
+            sec: sec,
+            uid: uid,
+            ses: ses,
+            sdkVersion: GravitySDKInfo.version,
+            platform: deviceUtils.getPlatformVersion(),
+            stacktrace: stacktrace
+        )
+
+        do {
+            let url = URL(string: "https://sdk-sentry.gravityfield.ai/error")!
+            try await performRequest(url: url, method: "POST", body: logMessage, authorized: false)
+        } catch {
+            GravityLogger.e(Self.TAG, "sendErrorMessage failed: \(error)", sendToBack: false)
+        }
+    }
+
     private func userForRequest(_ customerUser: User?) -> User {
         if let customerUser = customerUser {
             return customerUser
@@ -257,18 +292,20 @@ internal class GravityRepository {
     private func performRequest<T: Decodable>(
         endpoint: String,
         method: String,
-        body: Encodable? = nil
+        body: Encodable? = nil,
+        authorized: Bool = true
     ) async throws -> T {
         let url = URL(string: "\(baseUrl)\(endpoint)")!
-        return try await performRequest(url: url, method: method, body: body)
+        return try await performRequest(url: url, method: method, body: body, authorized: authorized)
     }
 
     private func performRequest<T: Decodable>(
         url: URL,
         method: String,
-        body: Encodable? = nil
+        body: Encodable? = nil,
+        authorized: Bool = true
     ) async throws -> T {
-        let (data, response) = try await makeRequest(url: url, method: method, body: body)
+        let (data, response) = try await makeRequest(url: url, method: method, body: body, authorized: authorized)
         
         do {
             return try jsonDecoder.decode(T.self, from: data)
@@ -280,21 +317,25 @@ internal class GravityRepository {
     private func performRequest(
         url: URL,
         method: String,
-        body: Encodable? = nil
+        body: Encodable? = nil,
+        authorized: Bool = true
     ) async throws {
-        _ = try await makeRequest(url: url, method: method, body: body)
+        _ = try await makeRequest(url: url, method: method, body: body, authorized: authorized)
     }
 
     private func makeRequest(
         url: URL,
         method: String,
-        body: Encodable? = nil
+        body: Encodable? = nil,
+        authorized: Bool = true
     ) async throws -> (Data, HTTPURLResponse) {
         var request = URLRequest(url: url)
         request.httpMethod = method
         
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(GravitySDK.instance.apiKey)", forHTTPHeaderField: "Authorization")
+        if authorized {
+            request.setValue("Bearer \(GravitySDK.instance.apiKey)", forHTTPHeaderField: "Authorization")
+        }
 
         if let body = body {
             do {
