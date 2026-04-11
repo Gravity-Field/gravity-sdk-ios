@@ -237,9 +237,18 @@ public enum GravityContentAlignment: String, Codable {
         case .end: return .trailing
         }
     }
+    
+    @available(iOS 13.0, *)
+    public func toVerticalAlignment() -> VerticalAlignment {
+        switch self {
+        case .start: return .top
+        case .center: return .center
+        case .end: return .bottom
+        }
+    }
 
     @available(iOS 13.0, *)
-    public func toVerticalAlignment() -> Alignment {
+    public func toAlignment() -> Alignment {
         switch self {
         case .start: return .top
         case .center: return .center
