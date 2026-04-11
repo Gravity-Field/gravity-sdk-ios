@@ -173,7 +173,7 @@ struct GravitySnackbarContent: View {
                 }
 
                 if let button = button {
-                    Spacer().frame(height: 8)
+                    Spacer().frame(height: 12)
                     GravityButton(
                         element: button,
                         onClickCallback: onClickCallback
