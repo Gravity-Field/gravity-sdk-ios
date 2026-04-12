@@ -2,7 +2,7 @@ import SwiftUI
 
 struct ProductsRow: View {
     let element: Element
-    let products: Products
+    let slots: [Slot]
     let content: CampaignContent
     let campaign: Campaign
 
@@ -20,8 +20,8 @@ struct ProductsRow: View {
         ScrollView(.horizontal, showsIndicators: false) {
             LazyHStack(spacing: 8) {
 
-                ForEach(products.slots!.indices, id: \.self) { index in
-                    let slot = products.slots![index]
+                ForEach(slots.indices, id: \.self) { index in
+                    let slot = slots[index]
 
                     Group {
                         if let builder = GravitySDK.instance.productViewBuilder

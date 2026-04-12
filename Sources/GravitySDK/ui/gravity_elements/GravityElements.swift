@@ -29,13 +29,12 @@ struct GravityElements: View {
                         $0.frame(maxHeight: .infinity)
                     }
             case .productsContainer:
-                if let products = content.products {
-
+                if let slots = content.products?.slots {
                     switch element.style.productContainerType {
                     case .row:
                         ProductsRow(
                             element: element,
-                            products: products,
+                            slots: slots,
                             content: content,
                             campaign: campaign
                         )
