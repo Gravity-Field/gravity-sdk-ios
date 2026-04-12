@@ -36,7 +36,9 @@ public struct GravityInlineSwiftUIView: View {
                         onClickCallback: handleClick
                     )
                 }
-                .frame(maxWidth: .infinity)
+                .applyIf(style?.layoutWidth == .matchParent) {
+                    $0.frame(maxWidth: .infinity)
+                }
                 .applyIf(style?.padding != nil) {
                     $0.padding(
                         .init(
@@ -100,7 +102,7 @@ public struct GravityInlineSwiftUIView: View {
                     } else if let height = content?.variables?.frameUI?.container
                         .style?.size?.height
                     {
-                        contentHeight = 500
+                        contentHeight = height
                     }
                 }
             } catch {

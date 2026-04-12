@@ -11,9 +11,8 @@ extension View {
         }
     }
 
-    func forceFrame(height: CGFloat) -> some View {
-        self.aspectRatio(contentMode: .fit)
-            .frame(height: height)
+    func forceFrame(height: CGFloat, alignment: Alignment = .top) -> some View {
+        self.frame(height: height, alignment: alignment)
             .clipped()
             .contentShape(Rectangle())
     }
