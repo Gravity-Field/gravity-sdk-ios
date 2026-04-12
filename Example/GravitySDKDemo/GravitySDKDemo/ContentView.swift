@@ -35,18 +35,28 @@ struct ContentView: View {
                 }
 
                 Button("Get content by selector") {
-                    Task{
-                        let response = await GravitySDK.instance.getContentBySelector(
-                            selector: "sdk_cart_reco",
-                            pageContext: PageContext(
-                                type: .cart,
-                                data: [],
-                                location: "homepage",
+                    Task {
+                        let response = await GravitySDK.instance
+                            .getContentBySelector(
+                                selector: "sdk_cart_reco",
+                                pageContext: PageContext(
+                                    type: .cart,
+                                    data: [],
+                                    location: "homepage",
+                                )
                             )
-                        )
                         print("response: \(String(describing: response))")
                     }
                 }
+
+                GravityInlineSwiftUIView(
+                    selector: "homepage_inline_banner",
+                    pageContext: PageContext(
+                        type: .homepage,
+                        data: [],
+                        location: "homepage",
+                    )
+                )
 
             }.frame(maxHeight: .infinity, alignment: .top)
                 .padding()
