@@ -2,11 +2,13 @@ import GravitySDK
 import SwiftUI
 
 struct ContentView: View {
-
+    
+    @State private var showInlineDemo = false
+    
     var body: some View {
-        ZStack {
+        NavigationStack {
             VStack(spacing: 20) {
-
+                
                 Button("Track view") {
                     GravitySDK.instance.trackView(
                         pageContext: PageContext(
@@ -16,7 +18,7 @@ struct ContentView: View {
                         )
                     )
                 }
-
+                
                 Button("Trigger event") {
                     GravitySDK.instance.triggerEvent(
                         events: [
@@ -24,7 +26,7 @@ struct ContentView: View {
                                 type: "tapbar_clicked",
                                 name: "tapbar_clicked",
                             )
-
+                            
                         ],
                         pageContext: PageContext(
                             type: .homepage,
@@ -33,7 +35,7 @@ struct ContentView: View {
                         )
                     )
                 }
-
+                
                 Button("Get content by selector") {
                     Task {
                         let response = await GravitySDK.instance
@@ -48,7 +50,11 @@ struct ContentView: View {
                         print("response: \(String(describing: response))")
                     }
                 }
-
+                
+                Button("Show UITableView with InlineView") {
+                    showInlineDemo = true
+                }
+                
                 GravityInlineSwiftUIView(
                     selector: "homepage_inline_banner",
                     pageContext: PageContext(
@@ -57,9 +63,14 @@ struct ContentView: View {
                         location: "homepage",
                     )
                 )
-
+                
             }.frame(maxHeight: .infinity, alignment: .top)
                 .padding()
+                .navigationDestination(isPresented: $showInlineDemo) {
+                    InlineDemoViewControllerRepresentable()
+                        .navigationTitle("Inline Demo")
+                        .navigationBarTitleDisplayMode(.inline)
+                }
         }
     }
 }

@@ -9,7 +9,7 @@ public enum ContextType: String, Codable {
     case other = "OTHER"
 }
 
-public struct PageContext: Codable {
+public struct PageContext: Codable, Equatable {
     public let type: ContextType
     public let data: [String]
     public let location: String

@@ -85,6 +85,7 @@ public struct GravityInlineSwiftUIView: View {
     }
 
     private func loadContent() {
+        guard campaign == nil else { return }
         isLoading = true
         Task {
             do {
