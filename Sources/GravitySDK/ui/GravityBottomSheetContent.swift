@@ -66,6 +66,7 @@ struct GravityBottomSheetContent: View {
                 .fixedSize(horizontal: false, vertical: true)
             }
             .onAppear {
+                ContentEventService.instance.sendContentImpression(content, campaign)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.01)
                 {
                     showSheet.toggle()

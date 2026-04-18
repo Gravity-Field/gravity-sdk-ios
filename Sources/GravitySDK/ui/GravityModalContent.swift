@@ -90,5 +90,8 @@ struct GravityModalContent: View {
                 height: min(contentHeight, UIScreen.main.bounds.height * 0.8)
             )
         }
+        .onAppear {
+            ContentEventService.instance.sendContentImpression(content, campaign)
+        }
     }
 }

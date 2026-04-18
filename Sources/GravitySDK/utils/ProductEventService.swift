@@ -14,13 +14,13 @@ internal class ProductEventService {
         _ campaign: Campaign,
         callbackTrackingEvent: Bool = true
     ) {
-        trackEvent(
-            action: .click,
-            slot: slot,
-            content: content,
-            campaign: campaign,
-            callbackTrackingEvent: callbackTrackingEvent
-        )
+        if callbackTrackingEvent {
+            GravitySDK.instance.callbackTrackingEvent(
+                ProductClickEvent(slot: slot, content: content, campaign: campaign)
+            )
+        }
+        
+        trackEngagement(action: .click, slot: slot)
     }
 
     func sendProductVisibleImpression(
@@ -29,45 +29,25 @@ internal class ProductEventService {
         _ campaign: Campaign,
         callbackTrackingEvent: Bool = true
     ) {
-        trackEvent(
-            action: .visibleImpression,
-            slot: slot,
-            content: content,
-            campaign: campaign,
-            callbackTrackingEvent: callbackTrackingEvent
-        )
+        if callbackTrackingEvent {
+            GravitySDK.instance.callbackTrackingEvent(
+                ProductImpressionEvent(slot: slot, content: content, campaign: campaign)
+            )
+        }
+        
+        trackEngagement(action: .visibleImpression, slot: slot)
     }
 
-    private func trackEvent(
+    private func trackEngagement(
         action: ProductAction,
-        slot: Slot,
-        content: CampaignContent,
-        campaign: Campaign,
-        callbackTrackingEvent: Bool
+        slot: Slot
     ) {
         guard let event = slot.events?.first(where: { $0.type == action }) else {
             return
         }
-
         Task {
             do {
                 try await repository.trackEngagementEvent(urls: event.urls)
-
-                if callbackTrackingEvent {
-                    let trackingEvent: TrackingEvent?
-                    switch action {
-                    case .visibleImpression:
-                        trackingEvent = ProductImpressionEvent(slot: slot, content: content, campaign: campaign)
-                    case .click:
-                        trackingEvent = ProductClickEvent(slot: slot, content: content, campaign: campaign)
-                    default:
-                        trackingEvent = nil
-                    }
-
-                    if let trackingEvent = trackingEvent {
-                        GravitySDK.instance.callbackTrackingEvent(trackingEvent)
-                    }
-                }
             } catch {}
         }
     }

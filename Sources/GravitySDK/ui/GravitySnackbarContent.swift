@@ -49,6 +49,7 @@ struct GravitySnackbarContent: View {
             }
         }
         .onAppear {
+            ContentEventService.instance.sendContentImpression(content, campaign)
 
             withAnimation(.default) {
                 showSnackbar = true

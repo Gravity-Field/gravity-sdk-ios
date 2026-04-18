@@ -314,6 +314,7 @@ public class GravitySDK {
         _ viewController: UIViewController
     ) {
         func dismiss() {
+            contentEventService.sendContentClosed(content, campaign)
             viewController.dismiss(animated: true)
         }
 
@@ -342,6 +343,7 @@ public class GravitySDK {
         _ viewController: UIViewController
     ) {
         func dismiss() {
+            contentEventService.sendContentClosed(content, campaign)
             viewController.dismiss(animated: true)
         }
 
@@ -376,6 +378,7 @@ public class GravitySDK {
             nil
 
         func dismiss() {
+            contentEventService.sendContentClosed(content, campaign)
             UIView.animate(
                 withDuration: 0.3,
                 animations: {
@@ -429,6 +432,7 @@ public class GravitySDK {
             nil
 
         func dismiss() {
+            contentEventService.sendContentClosed(content, campaign)
             controllerView?.removeFromSuperview()
         }
 

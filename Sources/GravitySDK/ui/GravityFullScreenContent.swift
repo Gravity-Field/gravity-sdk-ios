@@ -56,5 +56,8 @@ struct GravityFullScreenContent: View {
                 }
             }
         }
+        .onAppear {
+            ContentEventService.instance.sendContentImpression(content, campaign)
+        }
     }
 }
