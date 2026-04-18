@@ -34,7 +34,13 @@ public struct GravityInlineSwiftUIView: View {
                         GravityElements(
                             content: content,
                             campaign: campaign,
-                            onClickCallback: handleClick
+                            onClickCallback: { onClickModel in
+                                GravitySDK.instance.onClickHandler(
+                                    onClickModel: onClickModel,
+                                    content: content,
+                                    campaign: campaign
+                                )
+                            }
                         )
                     }
                 }
@@ -115,20 +121,6 @@ public struct GravityInlineSwiftUIView: View {
                 }
             }
         }
-    }
-
-    private func handleClick(_ onClickModel: OnClickModel) {
-        guard let campaign = campaign,
-            let content = campaign.payload.first?.contents.first
-        else {
-            return
-        }
-
-        GravitySDK.instance.onClickHandler(
-            onClickModel: onClickModel,
-            content: content,
-            campaign: campaign
-        )
     }
 
     private func sendImpression(content: CampaignContent, campaign: Campaign) {
