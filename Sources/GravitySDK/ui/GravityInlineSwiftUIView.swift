@@ -29,12 +29,14 @@ public struct GravityInlineSwiftUIView: View {
             if let campaign = campaign,
                 let content = campaign.payload.first?.contents.first
             {
-                VStack(alignment: horizontalAlignment) {
-                    GravityElements(
-                        content: content,
-                        campaign: campaign,
-                        onClickCallback: handleClick
-                    )
+                ContentVisibilityTracker(content: content, campaign: campaign) {
+                    VStack(alignment: horizontalAlignment) {
+                        GravityElements(
+                            content: content,
+                            campaign: campaign,
+                            onClickCallback: handleClick
+                        )
+                    }
                 }
                 .applyIf(style?.layoutWidth == .matchParent) {
                     $0.frame(maxWidth: .infinity)

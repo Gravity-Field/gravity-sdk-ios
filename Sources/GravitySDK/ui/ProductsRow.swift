@@ -22,9 +22,12 @@ struct ProductsRow: View {
                 ForEach(slots.indices, id: \.self) { index in
                     let slot = slots[index]
 
-                    Group {
-                        if let builder = GravitySDK.instance.productViewBuilder
-                        {
+                    ProductVisibilityTracker(
+                        slot: slot,
+                        content: content,
+                        campaign: campaign
+                    ) {
+                        if let builder = GravitySDK.instance.productViewBuilder {
                             builder.build(
                                 slot: slot,
                                 content: content,

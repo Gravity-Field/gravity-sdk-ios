@@ -40,47 +40,49 @@ struct GravityModalContent: View {
                 .onTapGesture {
                     onDismiss()
                 }
-            ZStack {
-                RoundedRectangle(cornerRadius: style?.cornerRadius ?? 0)
-                    .fill(style?.backgroundColor ?? Color.white)
+            ContentVisibilityTracker(content: content, campaign: campaign) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: style?.cornerRadius ?? 0)
+                        .fill(style?.backgroundColor ?? Color.white)
 
-                GeometryReader { geometry in
-                    ScrollView {
-                        VStack(alignment: horizontalAlignment) {
-                            GravityElements(
-                                content: content,
-                                campaign: campaign,
-                                onClickCallback: onClickCallback
-                            )
-                        }
-                        .applyIf(padding != nil) {
-                            $0.padding(
-                                .init(
-                                    top: padding!.top,
-                                    leading: padding!.left,
-                                    bottom: padding!.bottom,
-                                    trailing: padding!.right
+                    GeometryReader { geometry in
+                        ScrollView {
+                            VStack(alignment: horizontalAlignment) {
+                                GravityElements(
+                                    content: content,
+                                    campaign: campaign,
+                                    onClickCallback: onClickCallback
                                 )
+                            }
+                            .applyIf(padding != nil) {
+                                $0.padding(
+                                    .init(
+                                        top: padding!.top,
+                                        leading: padding!.left,
+                                        bottom: padding!.bottom,
+                                        trailing: padding!.right
+                                    )
+                                )
+                            }
+                            .frame(maxWidth: .infinity)
+                            .background(
+                                GeometryReader { innerGeometry in
+                                    Color.clear
+                                        .onAppear {
+                                            contentHeight =
+                                                innerGeometry.size.height
+                                        }
+                                        .onChange(of: innerGeometry.size.height) {
+                                            newHeight in
+                                            contentHeight = newHeight
+                                        }
+                                }
                             )
                         }
-                        .frame(maxWidth: .infinity)
-                        .background(
-                            GeometryReader { innerGeometry in
-                                Color.clear
-                                    .onAppear {
-                                        contentHeight =
-                                            innerGeometry.size.height
-                                    }
-                                    .onChange(of: innerGeometry.size.height) {
-                                        newHeight in
-                                        contentHeight = newHeight
-                                    }
-                            }
-                        )
                     }
-                }
-                if let close = close {
-                    CloseButton(close: close, onClickCallback: onClickCallback)
+                    if let close = close {
+                        CloseButton(close: close, onClickCallback: onClickCallback)
+                    }
                 }
             }
             .frame(width: UIScreen.main.bounds.width - 48)
