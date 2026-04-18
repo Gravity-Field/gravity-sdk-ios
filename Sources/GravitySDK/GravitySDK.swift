@@ -479,7 +479,7 @@ public class GravitySDK {
         dismissCallback: (() -> Void)? = nil
     ) {
         let action = onClickModel.action
-        let closeOnClick = onClickModel.closeOnClick ?? true
+        let closeOnClick = onClickModel.closeOnClick
 
         trackEngagementEvent(action, content.events)
 

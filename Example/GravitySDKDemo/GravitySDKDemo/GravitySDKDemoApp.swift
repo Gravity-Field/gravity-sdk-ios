@@ -1,5 +1,6 @@
 import GravitySDK
 import SwiftUI
+import UIKit
 
 @main
 struct GravitySDKDemoApp: App {
@@ -9,6 +10,7 @@ struct GravitySDKDemoApp: App {
             apiKey:"",
             section: "",
             gravityEventCallback: { event in },
+            productViewBuilder: DemoProductViewBuilder(),
             logLevel: LogLevel.debug
         )
     }
@@ -17,5 +19,15 @@ struct GravitySDKDemoApp: App {
         WindowGroup {
             ContentView()
         }
+    }
+}
+
+struct DemoProductViewBuilder: LegacyProductViewBuilder {
+    func createView(
+        slot: Slot,
+        content: CampaignContent,
+        campaign: Campaign
+    ) -> UIView {
+        ProductView(slot: slot)
     }
 }

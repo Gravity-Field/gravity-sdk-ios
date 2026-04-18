@@ -23,6 +23,7 @@ public struct Style: Decodable, Equatable {
     public let weight: Float?
     public let productContainerType: ProductContainerType?
     public let gridColumns: Int?
+    public let rowSpacing: Double?
 
     public init(
         backgroundColor: Color? = nil,
@@ -42,7 +43,8 @@ public struct Style: Decodable, Equatable {
         positioned: GravityPositioned? = nil,
         weight: Float? = nil,
         productContainerType: ProductContainerType? = nil,
-        gridColumns: Int? = nil
+        gridColumns: Int? = nil,
+        rowSpacing: Double? = nil
     ) {
         self.backgroundColor = backgroundColor
         self.pressColor = pressColor
@@ -62,12 +64,13 @@ public struct Style: Decodable, Equatable {
         self.weight = weight
         self.productContainerType = productContainerType
         self.gridColumns = gridColumns
+        self.rowSpacing = rowSpacing
     }
 
     private enum CodingKeys: String, CodingKey {
         case backgroundColor, pressColor, outlineColor, cornerRadius, size, margin, padding
         case fontSize, fontWeight, textColor, textcolor, textStyle, fit, contentAlignment, layoutWidth
-        case positioned, weight, productContainerType, gridColumns
+        case positioned, weight, productContainerType, gridColumns, rowSpacing
     }
 
     public init(from decoder: Decoder) throws {
@@ -97,6 +100,7 @@ public struct Style: Decodable, Equatable {
         weight = try? container.decodeIfPresent(Float.self, forKey: .weight)
         productContainerType = try? container.decodeIfPresent(ProductContainerType.self, forKey: .productContainerType)
         gridColumns = try? container.decodeIfPresent(Int.self, forKey: .gridColumns)
+        rowSpacing = try? container.decodeOptionalDimension(forKey: .rowSpacing)
     }
 
     public static let empty = Style()
