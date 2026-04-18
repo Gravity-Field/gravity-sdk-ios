@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+* Public methods no longer crash when called before `GravitySDK.initialize()`
+* Default `logLevel` is now `.error` instead of `.none`
 
 ## 0.1.0
 

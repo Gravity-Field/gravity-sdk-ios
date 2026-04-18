@@ -53,8 +53,7 @@ dependencies: [
 ```swift
 GravitySDK.initialize(
     apiKey: "your-api-key",
-    section: "your-section-id",
-    gravityEventCallback: { event in },
+    section: "your-section-id"
 )
 ```
 
@@ -64,17 +63,17 @@ GravitySDK.initialize(
 GravitySDK.initialize(
     apiKey: String,
     section: String,
-    gravityEventCallback: @escaping GravityEventCallback,
+    gravityEventCallback: GravityEventCallback? = nil,
     productViewBuilder: ProductViewBuilder? = nil,
     productFilter: ProductFilter? = nil,
-    logLevel: LogLevel = .none,
+    logLevel: LogLevel = .error,
 )
 ```
 
 - `productViewBuilder` — кастомная отрисовка карточек продуктов
 - `gravityEventCallback` — колбэк, вызываемый при трекинге событий
 - `productFilter` — фильтр продуктов
-- `logLevel` — уровень логирования SDK
+- `logLevel` — уровень логирования SDK. По умолчанию `.error` — видны только ошибки
 
 ## ProductViewBuilder — кастомизация отображения продуктов
 
@@ -136,8 +135,13 @@ let response = await GravitySDK.instance.getContentBySelector(
 
 ## Обработка ошибок
 
-Перед вызовами SDK необходимо убедиться, что он инициализирован. В противном случае будет выброшено исключение:
+Если любой публичный метод SDK вызван до `GravitySDK.initialize(...)`, вызов безопасно игнорируется:
+в лог пишется сообщение об ошибке, а методы, возвращающие значение, возвращают `nil`
 
-```
-GravitySDK has not been initialized
+Проверить состояние инициализации можно так:
+
+```swift
+if GravitySDK.isInitialized {
+    // SDK готов к работе
+}
 ```

@@ -5,7 +5,7 @@ internal class GravityLogger {
 
     private static let TAG = "GravitySDK"
 
-    internal static var logLevel: LogLevel = .none
+    internal static var logLevel: LogLevel = .error
 
     internal static func configure(_ logLevel: LogLevel) {
         self.logLevel = logLevel

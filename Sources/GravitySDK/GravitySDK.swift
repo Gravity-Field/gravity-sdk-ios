@@ -8,14 +8,14 @@ public typealias GravityEventCallback = (TrackingEvent) -> Void
 public class GravitySDK {
     internal let apiKey: String
     internal let section: String
-    private let gravityEventCallback: GravityEventCallback
+    private let gravityEventCallback: GravityEventCallback?
     internal let productViewBuilder: ProductViewBuilder?
     internal let productFilter: ProductFilter?
 
     private init(
         apiKey: String,
         section: String,
-        gravityEventCallback: @escaping GravityEventCallback,
+        gravityEventCallback: GravityEventCallback?,
         productViewBuilder: ProductViewBuilder?,
         productFilter: ProductFilter?
     ) {
@@ -28,22 +28,32 @@ public class GravitySDK {
 
     private static var _instance: GravitySDK?
 
+    private static let uninitializedInstance: GravitySDK = {
+        GravityLogger.configure(.error)
+        return GravitySDK(
+            apiKey: "",
+            section: "",
+            gravityEventCallback: nil,
+            productViewBuilder: nil,
+            productFilter: nil
+        )
+    }()
+
+    public static var isInitialized: Bool { _instance != nil }
+
     public static var instance: GravitySDK {
-        guard let instance = _instance else {
-            fatalError("GravitySDK has not been initialized")
-        }
-        return instance
+        _instance ?? uninitializedInstance
     }
-    
+
     private static let TAG = "SDK"
 
     public static func initialize(
         apiKey: String,
         section: String,
-        gravityEventCallback: @escaping GravityEventCallback,
+        gravityEventCallback: GravityEventCallback? = nil,
         productViewBuilder: ProductViewBuilder? = nil,
         productFilter: ProductFilter? = nil,
-        logLevel: LogLevel = .none
+        logLevel: LogLevel = .error
     ) {
         GravityLogger.configure(logLevel)
         _instance = GravitySDK(
@@ -71,18 +81,24 @@ public class GravitySDK {
         contentSettings: ContentSettings?,
         proxyUrl: String?
     ) {
+        guard checkInitialized() else { return }
+
         self.options = options ?? Options()
         self.contentSettings = contentSettings ?? ContentSettings()
         self.proxyUrl = proxyUrl
     }
 
     public func setUser(userId: String, sessionId: String) {
+        guard checkInitialized() else { return }
+
         user = User(custom: userId, ses: sessionId)
     }
 
     public func setNotificationPermissionStatus(
         status: NotificationPermissionStatus
     ) {
+        guard checkInitialized() else { return }
+
         notificationPermissionStatus = status
     }
 
@@ -90,6 +106,8 @@ public class GravitySDK {
         pageContext: PageContext,
         viewController: UIViewController? = nil,
     ) {
+        guard checkInitialized() else { return }
+
         Task {
             do {
                 guard
@@ -115,6 +133,8 @@ public class GravitySDK {
         pageContext: PageContext,
         viewController: UIViewController? = nil,
     ) {
+        guard checkInitialized() else { return }
+
         Task {
             do {
                 guard
@@ -140,6 +160,8 @@ public class GravitySDK {
         selector: String,
         pageContext: PageContext
     ) async -> ContentResponse? {
+        guard checkInitialized() else { return nil }
+
         guard
             let response = await repository.chooseBySelector(
                 selector: selector,
@@ -217,6 +239,8 @@ public class GravitySDK {
     }
 
     public func sendContentEngagement(engagement: ContentEngagement) {
+        guard checkInitialized() else { return }
+
         switch engagement {
         case let engagement as ContentImpressionEngagement:
             contentEventService.sendContentImpression(
@@ -242,6 +266,8 @@ public class GravitySDK {
     }
 
     public func sendProductEngagement(engagement: ProductEngagement) {
+        guard checkInitialized() else { return }
+
         switch engagement {
         case let engagement as ProductClickEngagement:
             productEventService.sendProductClick(
@@ -266,6 +292,8 @@ public class GravitySDK {
         _ campaignId: String,
         _ pageContext: PageContext
     ) async -> ContentResponse? {
+        guard checkInitialized() else { return nil }
+
         guard
             let response = await repository.chooseByCampaignId(
                 campaignId: campaignId,
@@ -298,6 +326,8 @@ public class GravitySDK {
         _ content: CampaignContent,
         _ campaign: Campaign,
     ) {
+        guard checkInitialized() else { return }
+
         switch content.deliveryMethod {
         case .fullScreen: showFullScreen(content, campaign, viewController)
         case .modal: showModal(content, campaign, viewController)
@@ -584,7 +614,7 @@ public class GravitySDK {
     internal func callbackTrackingEvent(_ event: TrackingEvent) {
         Task {
             await MainActor.run {
-                gravityEventCallback(event)
+                gravityEventCallback?(event)
             }
         }
     }
@@ -613,5 +643,18 @@ public class GravitySDK {
             topController = presentedViewController
         }
         return topController
+    }
+    
+    @discardableResult
+    private func checkInitialized(_ caller: String = #function) -> Bool {
+        guard Self.isInitialized else {
+            GravityLogger.e(
+                Self.TAG,
+                "\(caller) called before GravitySDK.initialize() — call ignored",
+                sendToBack: false
+            )
+            return false
+        }
+        return true
     }
 }
