@@ -8,11 +8,15 @@ public struct Products: Decodable {
     public let pageNumber: Int?
     public let countPages: Int?
 
+    enum CodingKeys: String, CodingKey {
+        case strategyId, fallback, name, slots, pageNumber, countPages
+    }
+
     public init(
         strategyId: String,
         fallback: Bool,
         name: String?,
-        slots: [Slot] = [],
+        slots: [Slot]? = nil,
         pageNumber: Int?,
         countPages: Int?,
     ) {
@@ -22,6 +26,22 @@ public struct Products: Decodable {
         self.slots = slots
         self.pageNumber = pageNumber
         self.countPages = countPages
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        self.strategyId = try container.decode(String.self, forKey: .strategyId)
+        self.fallback = try container.decode(Bool.self, forKey: .fallback)
+        self.name = try container.decodeIfPresent(String.self, forKey: .name)
+        self.pageNumber = try container.decodeIfPresent(Int.self, forKey: .pageNumber)
+        self.countPages = try container.decodeIfPresent(Int.self, forKey: .countPages)
+
+        var decodedSlots = try container.decodeIfPresent([Slot].self, forKey: .slots)
+        if let filter = GravitySDK.instance.productFilter {
+            decodedSlots = decodedSlots?.filter(filter)
+        }
+        self.slots = decodedSlots
     }
 }
 
