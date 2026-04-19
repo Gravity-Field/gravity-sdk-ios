@@ -321,13 +321,11 @@ public class GravitySDK {
         return response
     }
 
-    @MainActor public func showBackendContent(
+    @MainActor private func showBackendContent(
         _ viewController: UIViewController,
         _ content: CampaignContent,
         _ campaign: Campaign,
     ) {
-        guard checkInitialized() else { return }
-
         switch content.deliveryMethod {
         case .fullScreen: showFullScreen(content, campaign, viewController)
         case .modal: showModal(content, campaign, viewController)
