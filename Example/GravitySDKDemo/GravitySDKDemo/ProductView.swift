@@ -64,7 +64,7 @@ final class ProductView: UIView {
             wrap(nameLabel, horizontalPadding: 12),
             spacer(height: 8),
             wrap(priceRow, horizontalPadding: 12),
-            UIView(),
+            UIView()
         ])
         stack.axis = .vertical
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -74,7 +74,7 @@ final class ProductView: UIView {
             stack.leadingAnchor.constraint(equalTo: leadingAnchor),
             stack.trailingAnchor.constraint(equalTo: trailingAnchor),
             stack.topAnchor.constraint(equalTo: topAnchor),
-            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor)
         ])
     }
 
@@ -93,7 +93,7 @@ final class ProductView: UIView {
             view.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: horizontalPadding),
             view.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -horizontalPadding),
             view.topAnchor.constraint(equalTo: container.topAnchor),
-            view.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            view.bottomAnchor.constraint(equalTo: container.bottomAnchor)
         ])
         return container
     }

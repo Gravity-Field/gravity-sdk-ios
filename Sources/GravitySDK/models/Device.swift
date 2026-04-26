@@ -10,7 +10,7 @@ public struct Device: Codable {
         userAgent: String,
         id: String?,
         permission: NotificationPermissionStatus?,
-        tracking: String?,
+        tracking: String?
     ) {
         self.userAgent = userAgent
         self.id = id

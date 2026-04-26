@@ -50,7 +50,7 @@ class InlineDemoViewController: UIViewController, UITableViewDataSource,
             ),
             tableView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             tableView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            tableView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            tableView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
     }
 
@@ -127,7 +127,7 @@ private class InlineCell: UITableViewCell {
             ),
             inlineView.bottomAnchor.constraint(
                 equalTo: contentView.bottomAnchor
-            ),
+            )
         ])
     }
 
@@ -167,7 +167,7 @@ private class TextCell: UITableViewCell {
             titleLabel.bottomAnchor.constraint(
                 equalTo: contentView.bottomAnchor,
                 constant: -16
-            ),
+            )
         ])
     }
 
@@ -200,7 +200,7 @@ private class RectangleCell: UITableViewCell {
             ),
             colorView.bottomAnchor.constraint(
                 equalTo: contentView.bottomAnchor
-            ),
+            )
         ])
     }
 

@@ -125,7 +125,7 @@ internal class GravityRepository {
                 ],
                 user: userForRequest(customerUser),
                 ctx: mixPageContextAttributes(pageContext),
-                options: options,
+                options: options
             )
 
             let response: ContentResponse = try await performRequest(
@@ -164,7 +164,7 @@ internal class GravityRepository {
                 ],
                 user: userForRequest(customerUser),
                 ctx: mixPageContextAttributes(pageContext),
-                options: options,
+                options: options
             )
 
             let response: ContentResponse = try await performRequest(

@@ -104,7 +104,7 @@ public class GravitySDK {
 
     public func trackView(
         pageContext: PageContext,
-        viewController: UIViewController? = nil,
+        viewController: UIViewController? = nil
     ) {
         guard checkInitialized() else { return }
 
@@ -131,7 +131,7 @@ public class GravitySDK {
     public func triggerEvent(
         events: [TriggerEvent],
         pageContext: PageContext,
-        viewController: UIViewController? = nil,
+        viewController: UIViewController? = nil
     ) {
         guard checkInitialized() else { return }
 
@@ -246,19 +246,19 @@ public class GravitySDK {
             contentEventService.sendContentImpression(
                 engagement.content,
                 engagement.campaign,
-                callbackTrackingEvent: false,
+                callbackTrackingEvent: false
             )
         case let engagement as ContentVisibleImpressionEngagement:
             contentEventService.sendContentVisibleImpression(
                 engagement.content,
                 engagement.campaign,
-                callbackTrackingEvent: false,
+                callbackTrackingEvent: false
             )
         case let engagement as ContentCloseEngagement:
             contentEventService.sendContentClosed(
                 engagement.content,
                 engagement.campaign,
-                callbackTrackingEvent: false,
+                callbackTrackingEvent: false
             )
         default:
             break
@@ -274,14 +274,14 @@ public class GravitySDK {
                 engagement.slot,
                 engagement.content,
                 engagement.campaign,
-                callbackTrackingEvent: false,
+                callbackTrackingEvent: false
             )
         case let engagement as ProductVisibleImpressionEngagement:
             productEventService.sendProductVisibleImpression(
                 engagement.slot,
                 engagement.content,
                 engagement.campaign,
-                callbackTrackingEvent: false,
+                callbackTrackingEvent: false
             )
         default:
             break
@@ -354,7 +354,7 @@ public class GravitySDK {
                     onClickModel: onClickModel,
                     content: content,
                     campaign: campaign,
-                    dismissCallback: dismiss,
+                    dismissCallback: dismiss
                 )
             }
         )
@@ -383,7 +383,7 @@ public class GravitySDK {
                     onClickModel: onClickModel,
                     content: content,
                     campaign: campaign,
-                    dismissCallback: dismiss,
+                    dismissCallback: dismiss
                 )
             },
             onDismiss: dismiss
@@ -400,7 +400,7 @@ public class GravitySDK {
     @MainActor private func showBottomSheet(
         _ content: CampaignContent,
         _ campaign: Campaign,
-        _ viewController: UIViewController,
+        _ viewController: UIViewController
     ) {
         var hostingController: UIHostingController<GravityBottomSheetContent>? =
             nil
@@ -426,7 +426,7 @@ public class GravitySDK {
                     onClickModel: onClickModel,
                     content: content,
                     campaign: campaign,
-                    dismissCallback: dismiss,
+                    dismissCallback: dismiss
                 )
             },
             onDismiss: dismiss
@@ -450,7 +450,7 @@ public class GravitySDK {
     @MainActor private func showSnackbar(
         _ content: CampaignContent,
         _ campaign: Campaign,
-        _ viewController: UIViewController,
+        _ viewController: UIViewController
     ) {
         let template = content.templateSystemName
         if template == nil || template == TemplateSystemName.unknown { return }
@@ -472,7 +472,7 @@ public class GravitySDK {
                     onClickModel: onClickModel,
                     content: content,
                     campaign: campaign,
-                    dismissCallback: dismiss,
+                    dismissCallback: dismiss
                 )
             },
             onDismiss: dismiss
@@ -500,7 +500,7 @@ public class GravitySDK {
             hostingController.view.bottomAnchor.constraint(
                 equalTo: view.safeAreaLayoutGuide.bottomAnchor,
                 constant: -24
-            ),
+            )
         ])
     }
 
@@ -571,7 +571,7 @@ public class GravitySDK {
         case .requestPush:
             let notificationCenter = UNUserNotificationCenter.current()
             notificationCenter.requestAuthorization(options: [
-                .alert, .sound, .badge,
+                .alert, .sound, .badge
             ]) {
                 granted,
                 error in

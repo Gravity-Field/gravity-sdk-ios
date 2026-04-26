@@ -99,7 +99,7 @@ public struct GravityInlineSwiftUIView: View {
             do {
                 let result = try await GravitySDK.instance.getContentBySelector(
                     selector: selector,
-                    pageContext: pageContext,
+                    pageContext: pageContext
                 )
                 await MainActor.run {
                     isLoading = false

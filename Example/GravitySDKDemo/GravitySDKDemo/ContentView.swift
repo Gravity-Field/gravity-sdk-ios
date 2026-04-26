@@ -14,7 +14,7 @@ struct ContentView: View {
                         pageContext: PageContext(
                             type: .homepage,
                             data: [],
-                            location: "homepage",
+                            location: "homepage"
                         )
                     )
                 }
@@ -24,14 +24,14 @@ struct ContentView: View {
                         events: [
                             CustomEvent(
                                 type: "tapbar_clicked",
-                                name: "tapbar_clicked",
+                                name: "tapbar_clicked"
                             )
                             
                         ],
                         pageContext: PageContext(
                             type: .homepage,
                             data: [],
-                            location: "homepage",
+                            location: "homepage"
                         )
                     )
                 }
@@ -44,7 +44,7 @@ struct ContentView: View {
                                 pageContext: PageContext(
                                     type: .cart,
                                     data: [],
-                                    location: "homepage",
+                                    location: "homepage"
                                 )
                             )
                         print("response: \(String(describing: response))")
@@ -60,7 +60,7 @@ struct ContentView: View {
                     pageContext: PageContext(
                         type: .homepage,
                         data: [],
-                        location: "homepage",
+                        location: "homepage"
                     )
                 )
                 

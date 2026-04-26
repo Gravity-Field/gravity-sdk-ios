@@ -18,7 +18,7 @@ public struct Products: Decodable {
         name: String?,
         slots: [Slot]? = nil,
         pageNumber: Int?,
-        countPages: Int?,
+        countPages: Int?
     ) {
         self.strategyId = strategyId
         self.fallback = fallback

@@ -61,7 +61,7 @@ public class GravityInlineView: UIView {
             hosting.view.topAnchor.constraint(equalTo: topAnchor),
             hosting.view.leadingAnchor.constraint(equalTo: leadingAnchor),
             hosting.view.trailingAnchor.constraint(equalTo: trailingAnchor),
-            hosting.view.bottomAnchor.constraint(equalTo: bottomAnchor),
+            hosting.view.bottomAnchor.constraint(equalTo: bottomAnchor)
         ])
         self.hostingController = hosting
     }
@@ -181,7 +181,7 @@ private struct GravityInlineContentView: View {
             do {
                 let result = try await GravitySDK.instance.getContentBySelector(
                     selector: selector,
-                    pageContext: pageContext,
+                    pageContext: pageContext
                 )
                 await MainActor.run {
                     isLoading = false
