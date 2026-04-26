@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.0.1
+
 * Removed trailing commas
 
 ## 1.0.0

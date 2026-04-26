@@ -324,7 +324,7 @@ public class GravitySDK {
     @MainActor private func showBackendContent(
         _ viewController: UIViewController,
         _ content: CampaignContent,
-        _ campaign: Campaign,
+        _ campaign: Campaign
     ) {
         switch content.deliveryMethod {
         case .fullScreen: showFullScreen(content, campaign, viewController)
