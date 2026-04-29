@@ -16,7 +16,7 @@ internal class GravityLogger {
         os_log(
             "[GravitySDK] [%{public}@] %{public}@",
             log: .default,
-            type: .debug,
+            type: .default,
             prefix,
             message
         )
@@ -27,7 +27,7 @@ internal class GravityLogger {
         os_log(
             "[GravitySDK] [%{public}@] %{public}@",
             log: .default,
-            type: .info,
+            type: .default,
             prefix,
             message
         )

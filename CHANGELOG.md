@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+* Improved SDK log visibility
+
 ## 1.0.1
 
 * Removed trailing commas
