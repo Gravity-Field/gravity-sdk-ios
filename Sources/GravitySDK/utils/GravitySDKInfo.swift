@@ -1,5 +1,5 @@
 import Foundation
 
 final class GravitySDKInfo {
-    static let version: String = "1.0.1"
+    static let version: String = "1.0.2"
 }

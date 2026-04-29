@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.0.2
+
 * Improved SDK log visibility
 
 ## 1.0.1
