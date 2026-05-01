@@ -4,7 +4,7 @@ import UIKit
 
 public typealias ProductFilter = (Slot) -> Bool
 public typealias GravityEventCallback = (TrackingEvent) -> Void
-public typealias GravityLogListener = (LogLevel, String) -> Void
+public typealias GravityLogListener = @Sendable (LogLevel, String) -> Void
 
 
 public class GravitySDK {
