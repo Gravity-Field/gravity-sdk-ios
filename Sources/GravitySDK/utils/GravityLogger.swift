@@ -3,8 +3,6 @@ import os
 
 internal class GravityLogger {
 
-    private static let TAG = "GravitySDK"
-
     internal static var logLevel: LogLevel = .error
 
     internal static func configure(_ logLevel: LogLevel) {
@@ -13,24 +11,26 @@ internal class GravityLogger {
 
     internal static func d(prefix: String, _ message: String) {
         guard LogLevel.debug.rawValue >= logLevel.rawValue else { return }
+        let logMessage = "[\(prefix)] \(message)"
         os_log(
-            "[GravitySDK] [%{public}@] %{public}@",
+            "[GravitySDK] %{public}@",
             log: .default,
             type: .default,
-            prefix,
-            message
+            logMessage
         )
+        GravitySDK.instance.logListener?(.debug, logMessage)
     }
 
     internal static func i(prefix: String, _ message: String) {
         guard LogLevel.info.rawValue >= logLevel.rawValue else { return }
+        let logMessage = "[\(prefix)] \(message)"
         os_log(
-            "[GravitySDK] [%{public}@] %{public}@",
+            "[GravitySDK] %{public}@",
             log: .default,
             type: .default,
-            prefix,
-            message
+            logMessage
         )
+        GravitySDK.instance.logListener?(.info, logMessage)
     }
 
     internal static func e(
@@ -40,11 +40,19 @@ internal class GravityLogger {
         sendToBack: Bool = true
     ) {
         if LogLevel.error.rawValue >= logLevel.rawValue {
+            let logMessage: String
             if let error = error {
-                os_log("[GravitySDK] [%{public}@] %{public}@ - Error: %{public}@", log: .default, type: .error, prefix, message, error.localizedDescription)
+                logMessage = "[\(prefix)] \(message) - Error: \(error.localizedDescription)"
             } else {
-                os_log("[GravitySDK] [%{public}@] %{public}@", log: .default, type: .error, prefix, message)
+                logMessage = "[\(prefix)] \(message)"
             }
+            os_log(
+                "[GravitySDK] %{public}@",
+                log: .default,
+                type: .error,
+                logMessage
+            )
+            GravitySDK.instance.logListener?(.error, logMessage)
         }
 
         if sendToBack {

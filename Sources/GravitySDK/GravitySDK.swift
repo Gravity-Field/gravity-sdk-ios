@@ -4,6 +4,8 @@ import UIKit
 
 public typealias ProductFilter = (Slot) -> Bool
 public typealias GravityEventCallback = (TrackingEvent) -> Void
+public typealias GravityLogListener = (LogLevel, String) -> Void
+
 
 public class GravitySDK {
     internal let apiKey: String
@@ -68,6 +70,7 @@ public class GravitySDK {
     internal var user: User?
     private var options = Options()
     private var contentSettings = ContentSettings()
+    internal var logListener: GravityLogListener?
     internal var proxyUrl: String?
     internal var notificationPermissionStatus = NotificationPermissionStatus
         .unknown
@@ -100,6 +103,12 @@ public class GravitySDK {
         guard checkInitialized() else { return }
 
         notificationPermissionStatus = status
+    }
+
+    public func setLogListener(_ listener: GravityLogListener?) {
+        guard checkInitialized() else { return }
+
+        self.logListener = listener
     }
 
     public func trackView(

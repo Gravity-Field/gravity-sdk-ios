@@ -13,6 +13,9 @@ struct GravitySDKDemoApp: App {
             productViewBuilder: DemoProductViewBuilder(),
             logLevel: LogLevel.debug
         )
+        GravitySDK.instance.setLogListener { logLevel, message in
+            print("GravitySDK \(logLevel): \(message)")
+        }
     }
 
     var body: some Scene {
