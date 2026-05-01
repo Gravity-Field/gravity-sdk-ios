@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.0.4
+
 * Marked `GravityLogListener` as `@Sendable`
 
 ## 1.0.3
