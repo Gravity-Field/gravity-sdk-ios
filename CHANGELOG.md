@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.0.3
+
 * Added `setLogListener` to forward SDK logs to a custom callback
 
 ## 1.0.2
