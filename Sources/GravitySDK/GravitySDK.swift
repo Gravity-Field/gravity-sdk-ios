@@ -464,13 +464,20 @@ public class GravitySDK {
         let template = content.templateSystemName
         if template == nil || template == TemplateSystemName.unknown { return }
 
-        var controllerView: UIView? = nil
-        var hostingController: UIHostingController<GravitySnackbarContent>? =
-            nil
+        weak var weakHostingController:
+            UIHostingController<GravitySnackbarContent>?
+
+        var isDismissed = false
 
         func dismiss() {
+            guard !isDismissed else { return }
+            isDismissed = true
+
             contentEventService.sendContentClosed(content, campaign)
-            controllerView?.removeFromSuperview()
+            guard let hostingController = weakHostingController else { return }
+            hostingController.willMove(toParent: nil)
+            hostingController.view.removeFromSuperview()
+            hostingController.removeFromParent()
         }
 
         let snackbarView = GravitySnackbarContent(
@@ -486,16 +493,16 @@ public class GravitySDK {
             },
             onDismiss: dismiss
         )
-        hostingController = UIHostingController(rootView: snackbarView)
 
-        guard let hostingController = hostingController else { return }
+        let hostingController = UIHostingController(rootView: snackbarView)
+        weakHostingController = hostingController
 
-        controllerView = hostingController.view
-        let view = viewController.view!
+        guard let view = viewController.view else { return }
 
+        viewController.addChild(hostingController)
         hostingController.view.translatesAutoresizingMaskIntoConstraints = false
         hostingController.view.backgroundColor = .clear
-        viewController.view.addSubview(hostingController.view)
+        view.addSubview(hostingController.view)
 
         NSLayoutConstraint.activate([
             hostingController.view.leftAnchor.constraint(
@@ -511,6 +518,8 @@ public class GravitySDK {
                 constant: -24
             )
         ])
+
+        hostingController.didMove(toParent: viewController)
     }
 
     internal func onClickHandler(

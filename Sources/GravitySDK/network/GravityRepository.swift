@@ -228,7 +228,10 @@ internal class GravityRepository {
         )
 
         do {
-            let url = URL(string: "https://sdk-sentry.gravityfield.ai/error")!
+            let urlString = "https://sdk-sentry.gravityfield.ai/error"
+            guard let url = URL(string: urlString) else {
+                throw NetworkError.invalidURL(urlString)
+            }
             try await performRequest(url: url, method: "POST", body: logMessage, authorized: false)
         } catch {
             GravityLogger.e(Self.TAG, "sendErrorMessage failed: \(error)", sendToBack: false)
@@ -295,7 +298,10 @@ internal class GravityRepository {
         body: Encodable? = nil,
         authorized: Bool = true
     ) async throws -> T {
-        let url = URL(string: "\(baseUrl)\(endpoint)")!
+        let urlString = "\(baseUrl)\(endpoint)"
+        guard let url = URL(string: urlString) else {
+            throw NetworkError.invalidURL(urlString)
+        }
         return try await performRequest(url: url, method: method, body: body, authorized: authorized)
     }
 
@@ -478,6 +484,7 @@ enum NetworkError: Error, CustomStringConvertible {
     case httpError(statusCode: Int)
     case decodingError(Error)
     case encodingError(Error)
+    case invalidURL(String)
 
     var description: String {
         switch self {
@@ -489,6 +496,8 @@ enum NetworkError: Error, CustomStringConvertible {
             return "Failed to decode response: \(error)"
         case .encodingError(let error):
             return "Failed to encode request: \(error)"
+        case .invalidURL(let urlString):
+            return "Invalid URL: \(urlString)"
         }
     }
 }

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+* Remove force unwrap
+* Use child controller for snackbar
+* Make snackbar dismiss idempotent
+
 ## 1.0.4
 
 * Marked `GravityLogListener` as `@Sendable`
