@@ -6,6 +6,8 @@ import os
 
 public struct Style: Decodable, Equatable {
     public let backgroundColor: Color?
+    public let backgroundImage: String?
+    public let backgroundFit: GravityContentScale?
     public let pressColor: Color?
     public let outlineColor: Color?
     public let cornerRadius: Double?
@@ -27,6 +29,8 @@ public struct Style: Decodable, Equatable {
 
     public init(
         backgroundColor: Color? = nil,
+        backgroundImage: String? = nil,
+        backgroundFit: GravityContentScale? = nil,
         pressColor: Color? = nil,
         outlineColor: Color? = nil,
         cornerRadius: Double? = nil,
@@ -47,6 +51,8 @@ public struct Style: Decodable, Equatable {
         rowSpacing: Double? = nil
     ) {
         self.backgroundColor = backgroundColor
+        self.backgroundImage = backgroundImage
+        self.backgroundFit = backgroundFit
         self.pressColor = pressColor
         self.outlineColor = outlineColor
         self.cornerRadius = cornerRadius
@@ -68,7 +74,7 @@ public struct Style: Decodable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case backgroundColor, pressColor, outlineColor, cornerRadius, size, margin, padding
+        case backgroundColor, backgroundImage, backgroundFit, pressColor, outlineColor, cornerRadius, size, margin, padding
         case fontSize, fontWeight, textColor, textcolor, textStyle, fit, contentAlignment, layoutWidth
         case positioned, weight, productContainerType, gridColumns, rowSpacing
     }
@@ -77,6 +83,8 @@ public struct Style: Decodable, Equatable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
 
         backgroundColor = container.decodeOptionalColor(forKey: .backgroundColor)
+        backgroundImage = try? container.decodeIfPresent(String.self, forKey: .backgroundImage)
+        backgroundFit = try? container.decodeIfPresent(GravityContentScale.self, forKey: .backgroundFit)
         pressColor = container.decodeOptionalColor(forKey: .pressColor)
         outlineColor = container.decodeOptionalColor(forKey: .outlineColor)
         if let color = container.decodeOptionalColor(forKey: .textColor) {

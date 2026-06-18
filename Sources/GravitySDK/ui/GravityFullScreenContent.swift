@@ -29,7 +29,7 @@ struct GravityFullScreenContent: View {
     private var close: Close? {
         frameUi?.close
     }
-    
+
     var body: some View {
         ContentVisibilityTracker(content: content, campaign: campaign) {
             ZStack {
@@ -49,7 +49,13 @@ struct GravityFullScreenContent: View {
                         trailing: padding!.right
                     ))
                 }
-                .background(style?.backgroundColor)
+                .background(
+                    GravityBackgroundView(
+                        backgroundColor: style?.backgroundColor ?? Color(.systemBackground),
+                        backgroundImage: style?.backgroundImage,
+                        backgroundFit: style?.backgroundFit
+                    )
+                )
 
                 if let close = close {
                     CloseButton(close: close, onClickCallback: onClickCallback)

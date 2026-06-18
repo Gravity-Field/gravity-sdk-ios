@@ -42,9 +42,6 @@ struct GravityModalContent: View {
                 }
             ContentVisibilityTracker(content: content, campaign: campaign) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: style?.cornerRadius ?? 0)
-                        .fill(style?.backgroundColor ?? Color.white)
-
                     GeometryReader { geometry in
                         ScrollView {
                             VStack(alignment: horizontalAlignment) {
@@ -84,6 +81,16 @@ struct GravityModalContent: View {
                         CloseButton(close: close, onClickCallback: onClickCallback)
                     }
                 }
+                .background(
+                    GravityBackgroundView(
+                        backgroundColor: style?.backgroundColor ?? Color(.systemBackground),
+                        backgroundImage: style?.backgroundImage,
+                        backgroundFit: style?.backgroundFit
+                    )
+                )
+                .clipShape(
+                    RoundedRectangle(cornerRadius: style?.cornerRadius ?? 0)
+                )
             }
             .frame(width: UIScreen.main.bounds.width - 48)
             .frame(

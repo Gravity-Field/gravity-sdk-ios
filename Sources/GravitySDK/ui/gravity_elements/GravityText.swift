@@ -16,6 +16,12 @@ struct GravityText: View {
     private var labelFont: Font? {
         let size = style?.fontSize.map { CGFloat($0) }
         let weight = style?.fontWeight.map { $0.toWeight() }
+
+        if let base = GravitySDK.instance.customFont {
+            let sized = Font(base.withSize(size ?? UIFont.labelFontSize))
+            return weight.map { sized.weight($0) } ?? sized
+        }
+
         switch (size, weight) {
         case let (s?, w?):
             return .system(size: s, weight: w)

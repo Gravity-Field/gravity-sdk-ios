@@ -57,9 +57,13 @@ public struct GravityInlineSwiftUIView: View {
                         )
                     )
                 }
-                .applyIf(style?.backgroundColor != nil) {
-                    $0.background(style!.backgroundColor!)
-                }
+                .background(
+                    GravityBackgroundView(
+                        backgroundColor: style?.backgroundColor,
+                        backgroundImage: style?.backgroundImage,
+                        backgroundFit: style?.backgroundFit
+                    )
+                )
                 .applyIf(style?.cornerRadius != nil) {
                     $0.clipShape(
                         RoundedRectangle(cornerRadius: style!.cornerRadius!)

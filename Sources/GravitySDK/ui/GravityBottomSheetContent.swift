@@ -31,7 +31,7 @@ struct GravityBottomSheetContent: View {
     private var close: Close? {
         frameUi?.close
     }
-    
+
     @State private var showSheet = false
     @State private var sheetHeight: CGFloat? = .zero
 
@@ -56,7 +56,13 @@ struct GravityBottomSheetContent: View {
                                 trailing: padding!.right
                             ))
                         }
-                        .background(style?.backgroundColor)
+                        .background(
+                            GravityBackgroundView(
+                                backgroundColor: style?.backgroundColor ?? Color(.systemBackground),
+                                backgroundImage: style?.backgroundImage,
+                                backgroundFit: style?.backgroundFit
+                            )
+                        )
 
                         if let close = close {
                             CloseButton(close: close, onClickCallback: onClickCallback)

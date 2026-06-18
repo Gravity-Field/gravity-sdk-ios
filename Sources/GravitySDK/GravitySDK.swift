@@ -13,19 +13,34 @@ public class GravitySDK {
     private let gravityEventCallback: GravityEventCallback?
     internal let productViewBuilder: ProductViewBuilder?
     internal let productFilter: ProductFilter?
+    internal let customFont: UIFont?
 
     private init(
         apiKey: String,
         section: String,
         gravityEventCallback: GravityEventCallback?,
         productViewBuilder: ProductViewBuilder?,
-        productFilter: ProductFilter?
+        productFilter: ProductFilter?,
+        uiSettings: UISettings?
     ) {
         self.apiKey = apiKey
         self.section = section
         self.gravityEventCallback = gravityEventCallback
         self.productViewBuilder = productViewBuilder
         self.productFilter = productFilter
+
+        if let fontName = uiSettings?.fontName {
+            let font = UIFont(name: fontName, size: UIFont.labelFontSize)
+            if font == nil {
+                GravityLogger.e(
+                    Self.TAG,
+                    "Failed to load font '\(fontName)', using system font"
+                )
+            }
+            self.customFont = font
+        } else {
+            self.customFont = nil
+        }
     }
 
     private static var _instance: GravitySDK?
@@ -37,7 +52,8 @@ public class GravitySDK {
             section: "",
             gravityEventCallback: nil,
             productViewBuilder: nil,
-            productFilter: nil
+            productFilter: nil,
+            uiSettings: nil
         )
     }()
 
@@ -55,6 +71,7 @@ public class GravitySDK {
         gravityEventCallback: GravityEventCallback? = nil,
         productViewBuilder: ProductViewBuilder? = nil,
         productFilter: ProductFilter? = nil,
+        uiSettings: UISettings? = nil,
         logLevel: LogLevel = .error
     ) {
         GravityLogger.configure(logLevel)
@@ -63,7 +80,8 @@ public class GravitySDK {
             section: section,
             gravityEventCallback: gravityEventCallback,
             productViewBuilder: productViewBuilder,
-            productFilter: productFilter
+            productFilter: productFilter,
+            uiSettings: uiSettings
         )
     }
 
@@ -226,11 +244,27 @@ public class GravitySDK {
             else { continue }
 
             guard let campaign = result.data.first,
-                let payload = campaign.payload.first,
-                let content = payload.contents.first(where: { $0.step != nil })
-                    ?? payload.contents.first
+                let payload = campaign.payload.first
             else {
                 continue
+            }
+
+            let sortedContents = payload.contents.sorted { lhs, rhs in
+                switch (lhs.step, rhs.step) {
+                case let (lStep?, rStep?): return lStep < rStep
+                case (nil, nil): return false
+                case (nil, _): return true
+                case (_, nil): return false
+                }
+            }
+            guard let content = sortedContents.first else {
+                continue
+            }
+
+            guard let elements = content.variables?.elements,
+                !elements.isEmpty
+            else {
+                return
             }
 
             if let delayTime = campaignId.delayTime {
