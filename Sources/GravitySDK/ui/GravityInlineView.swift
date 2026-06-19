@@ -8,6 +8,7 @@ public class GravityInlineView: UIView {
     private var hostingController: UIHostingController<GravityInlineContentView>?
     private let pageContextProvider = PageContextProvider()
     private var heightConstraint: NSLayoutConstraint?
+    private var loader: AnyView?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -29,6 +30,15 @@ public class GravityInlineView: UIView {
         pageContextProvider.provide(pageContext)
     }
 
+    public func initialize<Loader: View>(
+        pageContext: PageContext,
+        @ViewBuilder loader: () -> Loader
+    ) {
+        self.loader = AnyView(loader())
+        setupHostingIfNeeded()
+        pageContextProvider.provide(pageContext)
+    }
+
     override public var intrinsicContentSize: CGSize {
         CGSize(width: UIView.noIntrinsicMetric, height: heightConstraint?.constant ?? 0)
     }
@@ -46,6 +56,10 @@ public class GravityInlineView: UIView {
         let contentView = GravityInlineContentView(
             selector: selector,
             pageContextProvider: pageContextProvider,
+            loader: loader,
+            presentingViewController: { [weak self] in
+                self?.findPresentingViewController()
+            },
             changeHeight: { [weak self] height in
                 guard let self else { return }
                 self.heightConstraint?.constant = height
@@ -93,14 +107,16 @@ internal class PageContextProvider: ObservableObject {
 private struct GravityInlineContentView: View {
     let selector: String
     @ObservedObject var pageContextProvider: PageContextProvider
+    let loader: AnyView?
+    let presentingViewController: () -> UIViewController?
     let changeHeight: (CGFloat) -> Void
 
     @State private var campaign: Campaign?
-    @State private var isLoading = false
+    @State private var isLoading = true
 
     private var style: Style? {
         guard let campaign = campaign,
-              let content = campaign.payload.first?.contents.first
+              let content = campaign.payload.first?.contents.firstByStep()
         else { return nil }
         return content.variables?.frameUI?.container.style
     }
@@ -109,10 +125,16 @@ private struct GravityInlineContentView: View {
         style?.contentAlignment?.toHorizontalAlignment() ?? .center
     }
 
+    private var verticalAlignment: Alignment {
+        style?.verticalAlignment?.toAlignment() ?? .top
+    }
+
     var body: some View {
         Group {
-            if let campaign = campaign,
-               let content = campaign.payload.first?.contents.first
+            if isLoading, let loader = loader {
+                loader
+            } else if let campaign = campaign,
+               let content = campaign.payload.first?.contents.firstByStep()
             {
                 ContentVisibilityTracker(content: content, campaign: campaign) {
                     VStack(alignment: horizontalAlignment) {
@@ -120,10 +142,14 @@ private struct GravityInlineContentView: View {
                             content: content,
                             campaign: campaign,
                             onClickCallback: { onClickModel in
+                                guard let viewController = presentingViewController() else {
+                                    return
+                                }
                                 GravitySDK.instance.onClickHandler(
                                     onClickModel: onClickModel,
                                     content: content,
-                                    campaign: campaign
+                                    campaign: campaign,
+                                    viewController: viewController
                                 )
                             }
                         )
@@ -167,6 +193,7 @@ private struct GravityInlineContentView: View {
                 .onAppear {
                     sendImpression(content: content, campaign: campaign)
                 }
+                .frame(maxHeight: .infinity, alignment: verticalAlignment)
             } else {
                 Color.clear
             }
@@ -191,7 +218,7 @@ private struct GravityInlineContentView: View {
                     isLoading = false
                     campaign = result?.data.first
                     let payload = campaign?.payload.first
-                    let content = payload?.contents.first
+                    let content = payload?.contents.firstByStep()
                     if content == nil {
                         changeHeight(0)
                     } else if let height = content?.variables?.frameUI?.container
@@ -211,5 +238,18 @@ private struct GravityInlineContentView: View {
 
     private func sendImpression(content: CampaignContent, campaign: Campaign) {
         ContentEventService.instance.sendContentImpression(content, campaign)
+    }
+}
+
+extension UIView {
+    func findPresentingViewController() -> UIViewController? {
+        var responder: UIResponder? = self
+        while let current = responder {
+            if let viewController = current as? UIViewController {
+                return viewController
+            }
+            responder = current.next
+        }
+        return nil
     }
 }

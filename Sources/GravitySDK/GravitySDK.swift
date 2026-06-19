@@ -216,6 +216,39 @@ public class GravitySDK {
         return response
     }
 
+    public func getContentByGroupSelector(
+        groupSelector: String,
+        pageContext: PageContext
+    ) async -> ContentResponse? {
+        guard checkInitialized() else { return nil }
+
+        guard
+            let response = await repository.chooseByGroup(
+                group: groupSelector,
+                options: options,
+                contentSettings: contentSettings,
+                pageContext: pageContext
+            )
+        else { return nil }
+
+        await withTaskGroup(of: Void.self) { group in
+            for campaign in response.data {
+                for payload in campaign.payload {
+                    for content in payload.contents {
+                        group.addTask {
+                            self.contentEventService.sendContentLoaded(
+                                content,
+                                campaign
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        return response
+    }
+
     private func handleCampaignIdsResponse(
         _ response: CampaignIdsResponse,
         _ pageContext: PageContext,
@@ -367,12 +400,13 @@ public class GravitySDK {
     @MainActor private func showBackendContent(
         _ viewController: UIViewController,
         _ content: CampaignContent,
-        _ campaign: Campaign
+        _ campaign: Campaign,
+        item: Item? = nil
     ) {
         switch content.deliveryMethod {
-        case .fullScreen: showFullScreen(content, campaign, viewController)
-        case .modal: showModal(content, campaign, viewController)
-        case .bottomSheet: showBottomSheet(content, campaign, viewController)
+        case .fullScreen: showFullScreen(content, campaign, viewController, item: item)
+        case .modal: showModal(content, campaign, viewController, item: item)
+        case .bottomSheet: showBottomSheet(content, campaign, viewController, item: item)
         case .snackBar: showSnackbar(content, campaign, viewController)
         case .inline: break
         case .unknown: break
@@ -382,7 +416,8 @@ public class GravitySDK {
     @MainActor private func showFullScreen(
         _ content: CampaignContent,
         _ campaign: Campaign,
-        _ viewController: UIViewController
+        _ viewController: UIViewController,
+        item: Item? = nil
     ) {
         func dismiss() {
             contentEventService.sendContentClosed(content, campaign)
@@ -397,9 +432,11 @@ public class GravitySDK {
                     onClickModel: onClickModel,
                     content: content,
                     campaign: campaign,
+                    viewController: viewController,
                     dismissCallback: dismiss
                 )
-            }
+            },
+            item: item
         )
 
         let hostingController = UIHostingController(rootView: fullScreenView)
@@ -411,7 +448,8 @@ public class GravitySDK {
     @MainActor private func showModal(
         _ content: CampaignContent,
         _ campaign: Campaign,
-        _ viewController: UIViewController
+        _ viewController: UIViewController,
+        item: Item? = nil
     ) {
         func dismiss() {
             contentEventService.sendContentClosed(content, campaign)
@@ -426,10 +464,12 @@ public class GravitySDK {
                     onClickModel: onClickModel,
                     content: content,
                     campaign: campaign,
+                    viewController: viewController,
                     dismissCallback: dismiss
                 )
             },
-            onDismiss: dismiss
+            onDismiss: dismiss,
+            item: item
         )
 
         let hostingController = UIHostingController(rootView: modalView)
@@ -443,51 +483,38 @@ public class GravitySDK {
     @MainActor private func showBottomSheet(
         _ content: CampaignContent,
         _ campaign: Campaign,
-        _ viewController: UIViewController
+        _ viewController: UIViewController,
+        item: Item? = nil
     ) {
-        var hostingController: UIHostingController<GravityBottomSheetContent>? =
-            nil
+        var requestClose: (() -> Void)?
 
         func dismiss() {
             contentEventService.sendContentClosed(content, campaign)
-            UIView.animate(
-                withDuration: 0.3,
-                animations: {
-                    hostingController?.view.alpha = 0
-                },
-                completion: { _ in
-                    viewController.dismiss(animated: false)
-                }
-            )
+            viewController.dismiss(animated: false)
         }
 
         let fullScreenView = GravityBottomSheetContent(
             content: content,
             campaign: campaign,
+            onBindClose: { requestClose = $0 },
             onClickCallback: { onClickModel in
                 self.onClickHandler(
                     onClickModel: onClickModel,
                     content: content,
                     campaign: campaign,
-                    dismissCallback: dismiss
+                    viewController: viewController,
+                    dismissCallback: { requestClose?() }
                 )
             },
-            onDismiss: dismiss
+            onDismiss: dismiss,
+            item: item
         )
 
-        hostingController = UIHostingController(rootView: fullScreenView)
-
-        guard let hostingController = hostingController else { return }
-
+        let hostingController = UIHostingController(rootView: fullScreenView)
         hostingController.modalPresentationStyle = .overFullScreen
         hostingController.view.backgroundColor = .clear
-        hostingController.view.alpha = 0
 
-        viewController.present(hostingController, animated: false) {
-            UIView.animate(withDuration: 0.3) {
-                hostingController.view.alpha = 1
-            }
-        }
+        viewController.present(hostingController, animated: false)
     }
 
     @MainActor private func showSnackbar(
@@ -522,6 +549,7 @@ public class GravitySDK {
                     onClickModel: onClickModel,
                     content: content,
                     campaign: campaign,
+                    viewController: viewController,
                     dismissCallback: dismiss
                 )
             },
@@ -560,6 +588,7 @@ public class GravitySDK {
         onClickModel: OnClickModel,
         content: CampaignContent,
         campaign: Campaign,
+        viewController: UIViewController,
         dismissCallback: (() -> Void)? = nil
     ) {
         let action = onClickModel.action
@@ -643,6 +672,29 @@ public class GravitySDK {
             callbackTrackingEvent(
                 RequestPushEvent(content: content, campaign: campaign)
             )
+
+        case .openStep:
+            guard let nextStep = onClickModel.step,
+                let targetContent = campaign.payload.first?.contents.first(
+                    where: { $0.step == nextStep }
+                )
+            else { return }
+
+            let item: Item?
+            if let itemId = onClickModel.itemId {
+                item = content.items?.first(where: { $0.id == itemId })
+            } else {
+                item = nil
+            }
+
+            Task { @MainActor in
+                self.showBackendContent(
+                    viewController,
+                    targetContent,
+                    campaign,
+                    item: item
+                )
+            }
 
         @unknown default:
             break

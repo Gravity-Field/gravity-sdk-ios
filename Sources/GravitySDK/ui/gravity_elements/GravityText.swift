@@ -4,13 +4,29 @@ import os
 struct GravityText: View {
     let element: Element
     let onClickCallback: (OnClickModel) -> Void
+    var item: Item? = nil
     
     private var style: Style? {
         element.style
     }
+
+    private var resolvedText: String {
+        if let item = item, let key = element.text {
+            return item.values[key] ?? ""
+        }
+        return element.text ?? ""
+    }
     
     private var textAlignment: TextAlignment {
         style?.contentAlignment?.toTextAlignment() ?? .leading
+    }
+
+    private var frameAlignment: Alignment {
+        switch style?.contentAlignment {
+        case .center: return .center
+        case .end: return .trailing
+        default: return .leading
+        }
     }
     
     private var labelFont: Font? {
@@ -35,7 +51,7 @@ struct GravityText: View {
     }
     
     var body: some View {
-        Text(element.text ?? "")
+        Text(resolvedText)
             .foregroundColor(style?.textColor)
             .multilineTextAlignment(textAlignment)
             .applyIf(labelFont != nil) {
@@ -50,13 +66,13 @@ struct GravityText: View {
                 ))
             }
             .applyIf(style?.size?.width != nil) {
-                $0.frame(width: style!.size!.width!)
+                $0.frame(width: style!.size!.width!, alignment: frameAlignment)
             }
             .applyIf(style?.size?.height != nil) {
                 $0.frame(height: style!.size!.height!)
             }
             .applyIf(style?.layoutWidth == .matchParent) {
-                $0.frame(maxWidth: .infinity)
+                $0.frame(maxWidth: .infinity, alignment: frameAlignment)
             }
             .applyIf(element.onClick != nil) {
                 $0.onTapGesture {

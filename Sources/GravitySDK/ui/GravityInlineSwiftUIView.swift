@@ -1,21 +1,39 @@
 import SwiftUI
+import UIKit
+
+private final class PresentingViewControllerHolder {
+    weak var viewController: UIViewController?
+}
 
 public struct GravityInlineSwiftUIView: View {
     let selector: String
     let pageContext: PageContext
+    let loader: AnyView?
 
     public init(selector: String, pageContext: PageContext) {
         self.selector = selector
         self.pageContext = pageContext
+        self.loader = nil
+    }
+
+    public init<Loader: View>(
+        selector: String,
+        pageContext: PageContext,
+        @ViewBuilder loader: () -> Loader
+    ) {
+        self.selector = selector
+        self.pageContext = pageContext
+        self.loader = AnyView(loader())
     }
 
     @State private var campaign: Campaign?
     @State private var contentHeight: CGFloat?
-    @State private var isLoading = false
+    @State private var isLoading = true
+    @State private var presentingViewControllerHolder = PresentingViewControllerHolder()
 
     private var style: Style? {
         guard let campaign = campaign,
-            let content = campaign.payload.first?.contents.first
+            let content = campaign.payload.first?.contents.firstByStep()
         else { return nil }
         return content.variables?.frameUI?.container.style
     }
@@ -24,10 +42,16 @@ public struct GravityInlineSwiftUIView: View {
         style?.contentAlignment?.toHorizontalAlignment() ?? .center
     }
 
+    private var verticalAlignment: Alignment {
+        style?.verticalAlignment?.toAlignment() ?? .top
+    }
+
     public var body: some View {
         Group {
-            if let campaign = campaign,
-                let content = campaign.payload.first?.contents.first
+            if isLoading, let loader = loader {
+                loader
+            } else if let campaign = campaign,
+                let content = campaign.payload.first?.contents.firstByStep()
             {
                 ContentVisibilityTracker(content: content, campaign: campaign) {
                     VStack(alignment: horizontalAlignment) {
@@ -35,10 +59,17 @@ public struct GravityInlineSwiftUIView: View {
                             content: content,
                             campaign: campaign,
                             onClickCallback: { onClickModel in
+                                guard
+                                    let viewController =
+                                        presentingViewControllerHolder.viewController
+                                else {
+                                    return
+                                }
                                 GravitySDK.instance.onClickHandler(
                                     onClickModel: onClickModel,
                                     content: content,
-                                    campaign: campaign
+                                    campaign: campaign,
+                                    viewController: viewController
                                 )
                             }
                         )
@@ -87,13 +118,18 @@ public struct GravityInlineSwiftUIView: View {
             }
         }
         .applyIf(contentHeight != nil) {
-            $0.forceFrame(height: contentHeight!)
+            $0.forceFrame(height: contentHeight!, alignment: verticalAlignment)
         }
         .onAppear(perform: loadContent)
         .onChange(of: selector) { _ in
             campaign = nil
             loadContent()
         }
+        .background(
+            ViewControllerResolver { viewController in
+                presentingViewControllerHolder.viewController = viewController
+            }
+        )
     }
 
     private func loadContent() {
@@ -109,7 +145,7 @@ public struct GravityInlineSwiftUIView: View {
                     isLoading = false
                     campaign = result?.data.first
                     let payload = campaign?.payload.first
-                    let content = payload?.contents.first
+                    let content = payload?.contents.firstByStep()
                     if content == nil {
                         contentHeight = 0.0
                     } else if let height = content?.variables?.frameUI?.container
@@ -129,6 +165,46 @@ public struct GravityInlineSwiftUIView: View {
 
     private func sendImpression(content: CampaignContent, campaign: Campaign) {
         ContentEventService.instance.sendContentImpression(content, campaign)
+    }
+}
+
+private struct ViewControllerResolver: UIViewControllerRepresentable {
+    let onResolve: (UIViewController) -> Void
+
+    func makeUIViewController(context: Context) -> ResolverViewController {
+        ResolverViewController(onResolve: onResolve)
+    }
+
+    func updateUIViewController(
+        _ uiViewController: ResolverViewController,
+        context: Context
+    ) {
+        uiViewController.onResolve = onResolve
+        uiViewController.resolveIfNeeded()
+    }
+}
+
+private final class ResolverViewController: UIViewController {
+    var onResolve: (UIViewController) -> Void
+
+    init(onResolve: @escaping (UIViewController) -> Void) {
+        self.onResolve = onResolve
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func didMove(toParent parent: UIViewController?) {
+        super.didMove(toParent: parent)
+        resolveIfNeeded()
+    }
+
+    func resolveIfNeeded() {
+        if let parent = parent {
+            onResolve(parent)
+        }
     }
 }
 

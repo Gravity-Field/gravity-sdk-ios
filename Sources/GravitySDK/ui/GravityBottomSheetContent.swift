@@ -1,11 +1,13 @@
 import SwiftUI
-
+import UIKit
 
 struct GravityBottomSheetContent: View {
     let content: CampaignContent
     let campaign: Campaign
+    let onBindClose: (@escaping () -> Void) -> Void
     let onClickCallback: (OnClickModel) -> Void
     let onDismiss: () -> Void
+    var item: Item? = nil
 
     private var frameUi: FrameUI? {
         content.variables?.frameUI
@@ -32,114 +34,175 @@ struct GravityBottomSheetContent: View {
         frameUi?.close
     }
 
+    private var sheetBackgroundColor: Color {
+        style?.backgroundColor ?? Color(.systemBackground)
+    }
+
     @State private var showSheet = false
-    @State private var sheetHeight: CGFloat? = .zero
 
     var body: some View {
 
-            CustomSheet(isPresented: $showSheet, onDismiss: onDismiss) {
+            CustomSheet(
+                isPresented: $showSheet,
+                cornerRadius: style?.cornerRadius ?? 0,
+                onDismiss: onDismiss
+            ) {
                 ContentVisibilityTracker(content: content, campaign: campaign) {
-                    ZStack {
-                        VStack(alignment: horizontalAlignment) {
-                            GravityElements(
-                                content: content,
-                                campaign: campaign,
-                                onClickCallback: onClickCallback
-                            )
-                        }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .applyIf(padding != nil) {
-                            $0.padding(.init(
-                                top: padding!.top,
-                                leading: padding!.left,
-                                bottom: padding!.bottom,
-                                trailing: padding!.right
-                            ))
+                    VStack(spacing: 0) {
+                        ZStack {
+                            VStack(alignment: horizontalAlignment) {
+                                GravityElements(
+                                    content: content,
+                                    campaign: campaign,
+                                    onClickCallback: onClickCallback,
+                                    item: item
+                                )
+                            }
+                            .frame(maxWidth: .infinity)
+                            .applyIf(padding != nil) {
+                                $0.padding(.init(
+                                    top: padding!.top,
+                                    leading: padding!.left,
+                                    bottom: padding!.bottom,
+                                    trailing: padding!.right
+                                ))
+                            }
+
+                            if let close = close {
+                                CloseButton(close: close, onClickCallback: onClickCallback)
+                            }
                         }
                         .background(
                             GravityBackgroundView(
-                                backgroundColor: style?.backgroundColor ?? Color(.systemBackground),
+                                backgroundColor: sheetBackgroundColor,
                                 backgroundImage: style?.backgroundImage,
                                 backgroundFit: style?.backgroundFit
                             )
                         )
 
-                        if let close = close {
-                            CloseButton(close: close, onClickCallback: onClickCallback)
-                        }
+                        sheetBackgroundColor
+                            .frame(height: Self.bottomSafeAreaInset)
                     }
+                    .frame(maxWidth: .infinity)
                 }
                 .fixedSize(horizontal: false, vertical: true)
             }
             .onAppear {
-                ContentEventService.instance.sendContentImpression(content, campaign)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.01)
-                {
-                    showSheet.toggle()
+                onBindClose {
+                    showSheet = false
                 }
+                ContentEventService.instance.sendContentImpression(content, campaign)
+                showSheet = true
             }
+    }
+
+    private static var bottomSafeAreaInset: CGFloat {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap { $0.windows }
+            .first { $0.isKeyWindow }?
+            .safeAreaInsets.bottom ?? 0
     }
 }
 
 struct CustomSheet<Content: View>: View {
     @Binding var isPresented: Bool
+    let cornerRadius: CGFloat
     let onDismiss: () -> Void
     @ViewBuilder let content: () -> Content
 
-    @State private var offset: CGFloat = 0
-    @State private var lastOffset: CGFloat = 0
-    
+    @State private var isVisible = false
+    @State private var slideOffset: CGFloat = 0
+    @State private var dimOpacity: CGFloat = 0
+    @State private var dragOffset: CGFloat = 0
+
+    private var screenHeight: CGFloat {
+        UIScreen.main.bounds.height
+    }
+
+    private var currentDimOpacity: CGFloat {
+        max(0, dimOpacity - dragOffset / screenHeight)
+    }
+
     var body: some View {
         ZStack(alignment: .bottom) {
-            if isPresented {
-                Color.black.opacity(0.3 - (offset / UIScreen.main.bounds.height))
+            if isVisible {
+                Color.black
+                    .opacity(Double(currentDimOpacity))
+                    .ignoresSafeArea()
                     .onTapGesture {
-                        withAnimation(.spring()) {
-                            isPresented = false
-                            onDismiss()
-                        }
+                        isPresented = false
                     }
-                    .transition(.opacity)
+
+                content()
+                    .clipShape(
+                        CustomCorner(
+                            radius: cornerRadius,
+                            corners: [.topLeft, .topRight]
+                        )
+                    )
+                    .offset(y: slideOffset + dragOffset)
+                    .gesture(dragGesture)
             }
-            
-            if isPresented {
-                content().clipShape(
-                    CustomCorner(radius: 20, corners: [.topLeft, .topRight])
-                )
-                .offset(y: offset)
-                .gesture(
-                    DragGesture()
-                        .onChanged { value in
-                            let newOffset = lastOffset + value.translation.height
-                            if newOffset > 0 && newOffset < UIScreen.main.bounds.height * 0.6 {
-                                offset = newOffset
-                            }
-                        }
-                        .onEnded { value in
-                            let velocity = value.predictedEndTranslation.height - value.translation.height
-                            
-                            if offset > UIScreen.main.bounds.height * 0.3 || velocity > 150 {
-                                withAnimation(.spring()) {
-                                    isPresented = false
-                                    onDismiss()
-                                }
-                            } else {
-                                withAnimation(.spring()) {
-                                    offset = 0
-                                }
-                            }
-                            lastOffset = 0
-                        }
-                )
-                .transition(.move(edge: .bottom))
-                .onChange(of: isPresented) { newValue in
-                    if !newValue {
-                        offset = 0
+        }
+        .ignoresSafeArea()
+        .onChange(of: isPresented) { newValue in
+            if newValue {
+                openSheet()
+            } else if isVisible {
+                closeSheet()
+            }
+        }
+    }
+
+    private var dragGesture: some Gesture {
+        DragGesture()
+            .onChanged { value in
+                let newOffset = value.translation.height
+                if newOffset > 0 && newOffset < screenHeight * 0.6 {
+                    dragOffset = newOffset
+                }
+            }
+            .onEnded { value in
+                let velocity =
+                    value.predictedEndTranslation.height
+                    - value.translation.height
+
+                if dragOffset > screenHeight * 0.3 || velocity > 150 {
+                    isPresented = false
+                } else {
+                    withAnimation(.spring()) {
+                        dragOffset = 0
                     }
                 }
             }
+    }
+
+    private func openSheet() {
+        isVisible = true
+        slideOffset = screenHeight
+        dimOpacity = 0
+        dragOffset = 0
+
+        DispatchQueue.main.async {
+            withAnimation(.spring()) {
+                slideOffset = 0
+                dimOpacity = 0.3
+            }
         }
-        .animation(.spring(), value: isPresented)
+    }
+
+    private func closeSheet() {
+        withAnimation(.spring()) {
+            slideOffset = screenHeight
+            dimOpacity = 0
+            dragOffset = 0
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            isVisible = false
+            onDismiss()
+        }
     }
 }
 

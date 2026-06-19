@@ -136,7 +136,10 @@ private class InlineCell: UITableViewCell {
     }
 
     func configure(pageContext: PageContext) {
-        inlineView.initialize(pageContext: pageContext)
+        inlineView.initialize(pageContext: pageContext) {
+            ProgressView()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
     }
 }
 

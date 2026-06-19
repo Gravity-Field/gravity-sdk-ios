@@ -8,6 +8,7 @@ public struct CampaignContent: Decodable {
     public let step: Int?
     public let variables: Variables?
     public let products: Products?
+    public let items: [Item]?
     public let custom: CustomModel?
     public let events: [Event]?
 
@@ -19,6 +20,7 @@ public struct CampaignContent: Decodable {
         step: Int?,
         variables: Variables? = nil,
         products: Products? = nil,
+        items: [Item]? = nil,
         custom: CustomModel? = nil,
         events: [Event]? = nil
     ) {
@@ -29,7 +31,31 @@ public struct CampaignContent: Decodable {
         self.step = step
         self.variables = variables
         self.products = products
+        self.items = items
         self.custom = custom
         self.events = events
+    }
+}
+
+extension Array where Element == CampaignContent {
+    func firstByStep() -> CampaignContent? {
+        let lowestStep = filter { $0.step != nil }
+            .min { ($0.step ?? 0) < ($1.step ?? 0) }
+        return lowestStep ?? first
+    }
+
+    func firstByStepNullsFirst() -> CampaignContent? {
+        min { lhs, rhs in
+            switch (lhs.step, rhs.step) {
+            case (nil, nil):
+                return false
+            case (nil, _):
+                return true
+            case (_, nil):
+                return false
+            case let (lhsStep?, rhsStep?):
+                return lhsStep < rhsStep
+            }
+        }
     }
 }

@@ -5,6 +5,7 @@ struct GravityModalContent: View {
     let campaign: Campaign
     let onClickCallback: (OnClickModel) -> Void
     let onDismiss: () -> Void
+    var item: Item? = nil
 
     @State private var contentHeight: CGFloat = 0
 
@@ -29,6 +30,10 @@ struct GravityModalContent: View {
             ?? HorizontalAlignment.center
     }
 
+    private var verticalAlignment: Alignment {
+        style?.verticalAlignment?.toAlignment() ?? .top
+    }
+
     private var close: Close? {
         frameUi?.close
     }
@@ -48,7 +53,8 @@ struct GravityModalContent: View {
                                 GravityElements(
                                     content: content,
                                     campaign: campaign,
-                                    onClickCallback: onClickCallback
+                                    onClickCallback: onClickCallback,
+                                    item: item
                                 )
                             }
                             .applyIf(padding != nil) {
@@ -61,7 +67,7 @@ struct GravityModalContent: View {
                                     )
                                 )
                             }
-                            .frame(maxWidth: .infinity)
+                            .frame(maxWidth: .infinity, alignment: verticalAlignment)
                             .background(
                                 GeometryReader { innerGeometry in
                                     Color.clear
@@ -77,9 +83,6 @@ struct GravityModalContent: View {
                             )
                         }
                     }
-                    if let close = close {
-                        CloseButton(close: close, onClickCallback: onClickCallback)
-                    }
                 }
                 .background(
                     GravityBackgroundView(
@@ -90,6 +93,14 @@ struct GravityModalContent: View {
                 )
                 .clipShape(
                     RoundedRectangle(cornerRadius: style?.cornerRadius ?? 0)
+                )
+                .overlay(
+                    Group {
+                        if let close = close {
+                            CloseButton(close: close, onClickCallback: onClickCallback)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        }
+                    }
                 )
             }
             .frame(width: UIScreen.main.bounds.width - 48)

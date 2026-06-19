@@ -2,9 +2,10 @@ import GravitySDK
 import SwiftUI
 
 struct ContentView: View {
-    
+
     @State private var showInlineDemo = false
-    
+    @State private var showInlineListDemo = false
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 20) {
@@ -26,7 +27,7 @@ struct ContentView: View {
                                 type: "tapbar_clicked",
                                 name: "tapbar_clicked"
                             )
-                            
+
                         ],
                         pageContext: PageContext(
                             type: .homepage,
@@ -35,7 +36,7 @@ struct ContentView: View {
                         )
                     )
                 }
-                
+
                 Button("Get content by selector") {
                     Task {
                         let response = await GravitySDK.instance
@@ -54,7 +55,11 @@ struct ContentView: View {
                 Button("Show UITableView with InlineView") {
                     showInlineDemo = true
                 }
-                
+
+                Button("Show UITableView with InlineListView") {
+                    showInlineListDemo = true
+                }
+
                 GravityInlineSwiftUIView(
                     selector: "homepage_inline_banner",
                     pageContext: PageContext(
@@ -62,13 +67,21 @@ struct ContentView: View {
                         data: [],
                         location: "homepage"
                     )
-                )
+                ) {
+                    ProgressView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
                 
             }.frame(maxHeight: .infinity, alignment: .top)
                 .padding()
                 .navigationDestination(isPresented: $showInlineDemo) {
                     InlineDemoViewControllerRepresentable()
                         .navigationTitle("Inline Demo")
+                        .navigationBarTitleDisplayMode(.inline)
+                }
+                .navigationDestination(isPresented: $showInlineListDemo) {
+                    InlineListDemoViewControllerRepresentable()
+                        .navigationTitle("Inline List Demo")
                         .navigationBarTitleDisplayMode(.inline)
                 }
         }

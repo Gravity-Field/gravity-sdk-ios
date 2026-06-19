@@ -5,6 +5,7 @@ public struct Element: Decodable {
     public let text: String?
     public let src: String?
     public let onClick: OnClickModel?
+    public let itemCard: ItemCard?
     public let style: Style
     
     public init(
@@ -12,17 +13,19 @@ public struct Element: Decodable {
         text: String? = nil,
         src: String? = nil,
         onClick: OnClickModel? = nil,
+        itemCard: ItemCard? = nil,
         style: Style = Style.empty
     ) {
         self.type = type
         self.text = text
         self.src = src
         self.onClick = onClick
+        self.itemCard = itemCard
         self.style = style
     }
 
     enum CodingKeys: String, CodingKey {
-        case type, text, src, onClick, style
+        case type, text, src, onClick, itemCard, style
     }
 
     public init(from decoder: Decoder) throws {
@@ -31,6 +34,7 @@ public struct Element: Decodable {
         text = try container.decodeIfPresent(String.self, forKey: .text)
         src = try container.decodeIfPresent(String.self, forKey: .src)
         onClick = try container.decodeIfPresent(OnClickModel.self, forKey: .onClick)
+        itemCard = try container.decodeIfPresent(ItemCard.self, forKey: .itemCard)
         style = try container.decodeIfPresent(Style.self, forKey: .style) ?? Style.empty
     }
 }
@@ -38,9 +42,11 @@ public struct Element: Decodable {
 public enum ElementType: Decodable, Equatable {
     case image
     case text
+    case webview
     case button
     case spacer
     case productsContainer
+    case itemsContainer
     case unknown(String)
     
     public init(from decoder: Decoder) throws {
@@ -53,9 +59,11 @@ public enum ElementType: Decodable, Equatable {
         switch type {
         case "image": return .image
         case "text": return .text
+        case "webview": return .webview
         case "button": return .button
         case "spacer": return .spacer
         case "productsContainer", "products-container", "products_container": return .productsContainer
+        case "itemsContainer", "items-container", "items_container": return .itemsContainer
         default: return .unknown(type)
         }
     }
@@ -65,6 +73,7 @@ public struct OnClickModel: Decodable {
     public let action: Action
     public let copyData: String?
     public let step: Int?
+    public let itemId: String?
     public let url: String?
     public let type: FollowUrlType?
     public let deeplink: String?
@@ -74,6 +83,7 @@ public struct OnClickModel: Decodable {
         action: Action,
         copyData: String? = nil,
         step: Int? = nil,
+        itemId: String? = nil,
         url: String? = nil,
         type: FollowUrlType? = nil,
         deeplink: String? = nil,
@@ -82,6 +92,7 @@ public struct OnClickModel: Decodable {
         self.action = action
         self.copyData = copyData
         self.step = step
+        self.itemId = itemId
         self.url = url
         self.type = type
         self.deeplink = deeplink
@@ -89,7 +100,7 @@ public struct OnClickModel: Decodable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case action, copyData, step, url, type, deeplink, closeOnClick
+        case action, copyData, step, itemId, url, type, deeplink, closeOnClick
     }
 
     public init(from decoder: Decoder) throws {
@@ -97,10 +108,24 @@ public struct OnClickModel: Decodable {
         action = try container.decode(Action.self, forKey: .action)
         copyData = try container.decodeIfPresent(String.self, forKey: .copyData)
         step = try container.decodeIfPresent(Int.self, forKey: .step)
+        itemId = try container.decodeIfPresent(String.self, forKey: .itemId)
         url = try container.decodeIfPresent(String.self, forKey: .url)
         type = try container.decodeIfPresent(FollowUrlType.self, forKey: .type)
         deeplink = try container.decodeIfPresent(String.self, forKey: .deeplink)
         closeOnClick = try container.decodeIfPresent(Bool.self, forKey: .closeOnClick) ?? true
+    }
+
+    public func copyWith(itemId: String?) -> OnClickModel {
+        OnClickModel(
+            action: action,
+            copyData: copyData,
+            step: step,
+            itemId: itemId,
+            url: url,
+            type: type,
+            deeplink: deeplink,
+            closeOnClick: closeOnClick
+        )
     }
 }
 

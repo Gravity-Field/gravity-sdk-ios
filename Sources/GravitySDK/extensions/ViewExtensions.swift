@@ -21,30 +21,76 @@ extension View {
 extension View {
     @ViewBuilder
     func applyPositioned(_ positioned: GravityPositioned) -> some View {
-        let horizontal: HorizontalAlignment =
-            (positioned.left != nil)
-            ? .leading : (positioned.right != nil) ? .trailing : .leading
+        PositionedContainer(positioned: positioned) {
+            self
+        }
+    }
+}
 
-        let vertical: VerticalAlignment =
-            (positioned.top != nil)
-            ? .top : (positioned.bottom != nil) ? .bottom : .top
+private struct ViewSizePreferenceKey: PreferenceKey {
+    static var defaultValue: CGSize = .zero
 
-        let x: Double =
-            horizontal == .leading
-            ? (positioned.left ?? 0)
-            : (horizontal == .trailing) ? -(positioned.right ?? 0) : 0
+    static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
+        let next = nextValue()
+        if next != .zero {
+            value = next
+        }
+    }
+}
 
-        let y: Double =
-            vertical == .top
-            ? (positioned.top ?? 0)
-            : (vertical == .bottom) ? -(positioned.bottom ?? 0) : 0
+private struct PositionedContainer<Content: View>: View {
+    let positioned: GravityPositioned
+    @ViewBuilder let content: () -> Content
 
-        self
-            .frame(
-                maxWidth: .infinity,
-                maxHeight: .infinity,
-                alignment: .topTrailing
-            )
-            .offset(x: x, y: y)
+    @State private var contentSize: CGSize = .zero
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                Color.clear
+                    .allowsHitTesting(false)
+
+                content()
+                    .fixedSize()
+                    .background(
+                        GeometryReader { contentGeometry in
+                            Color.clear
+                                .preference(
+                                    key: ViewSizePreferenceKey.self,
+                                    value: contentGeometry.size
+                                )
+                        }
+                    )
+                    .onPreferenceChange(ViewSizePreferenceKey.self) { size in
+                        contentSize = size
+                    }
+                    .position(
+                        x: xPosition(containerWidth: geometry.size.width),
+                        y: yPosition(containerHeight: geometry.size.height)
+                    )
+            }
+        }
+    }
+
+    private func xPosition(containerWidth: CGFloat) -> CGFloat {
+        let width = contentSize.width
+        if let left = positioned.left {
+            return left + width / 2
+        }
+        if let right = positioned.right {
+            return containerWidth - right - width / 2
+        }
+        return containerWidth / 2
+    }
+
+    private func yPosition(containerHeight: CGFloat) -> CGFloat {
+        let height = contentSize.height
+        if let top = positioned.top {
+            return top + height / 2
+        }
+        if let bottom = positioned.bottom {
+            return containerHeight - bottom - height / 2
+        }
+        return containerHeight / 2
     }
 }

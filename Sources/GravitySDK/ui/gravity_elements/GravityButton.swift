@@ -4,9 +4,17 @@ import os
 struct GravityButton: View {
     let element: Element
     let onClickCallback: (OnClickModel) -> Void
+    var item: Item? = nil
 
     private var style: Style? {
         element.style
+    }
+
+    private var resolvedText: String {
+        if let item = item, let key = element.text {
+            return item.values[key] ?? ""
+        }
+        return element.text ?? ""
     }
 
     private var textStyle: GravityTextStyle? {
@@ -44,7 +52,7 @@ struct GravityButton: View {
                 onClickCallback(onClick)
             }
         }) {
-            Text(element.text ?? "")
+            Text(resolvedText)
                 .applyIf(labelFont != nil) {
                     $0.font(labelFont!)
                 }

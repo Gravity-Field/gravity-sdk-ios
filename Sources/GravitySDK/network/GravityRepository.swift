@@ -184,6 +184,45 @@ internal class GravityRepository {
         }
     }
 
+    func chooseByGroup(
+        group: String,
+        options: Options,
+        contentSettings: ContentSettings,
+        customerUser: User? = nil,
+        pageContext: PageContext
+    ) async -> ContentResponse? {
+        do {
+            let requestBody = ContentRequest(
+                sec: GravitySDK.instance.section,
+                device: deviceUtils.getDevice(),
+                data: [
+                    ByGroupData(
+                        group: group,
+                        options: contentSettings
+                    )
+                ],
+                user: userForRequest(customerUser),
+                ctx: mixPageContextAttributes(pageContext),
+                options: options
+            )
+
+            let response: ContentResponse = try await performRequest(
+                endpoint: CHOOSE,
+                method: "POST",
+                body: requestBody
+            )
+
+            saveUserIfNeeded(
+                customerUser: customerUser,
+                contentResponseUser: response.user
+            )
+            return response
+        } catch {
+            GravityLogger.e(Self.TAG, "chooseByGroup failed: \(error)")
+            return nil
+        }
+    }
+
     func trackEngagementEvent(urls: [String]) async throws {
         await withTaskGroup(of: Void.self) { group in
             for url in urls {
@@ -475,6 +514,11 @@ internal class GravityRepository {
 
     private struct BySelectorData: ContentRequestData {
         let selector: String
+        let options: ContentSettings
+    }
+
+    private struct ByGroupData: ContentRequestData {
+        let group: String
         let options: ContentSettings
     }
 }

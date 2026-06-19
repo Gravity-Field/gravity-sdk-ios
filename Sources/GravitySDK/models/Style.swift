@@ -20,6 +20,7 @@ public struct Style: Decodable, Equatable {
     public let textStyle: GravityTextStyle?
     public let fit: GravityContentScale?
     public let contentAlignment: GravityContentAlignment?
+    public let verticalAlignment: GravityContentAlignment?
     public let layoutWidth: GravityLayoutWidth?
     public let positioned: GravityPositioned?
     public let weight: Float?
@@ -43,6 +44,7 @@ public struct Style: Decodable, Equatable {
         textStyle: GravityTextStyle? = nil,
         fit: GravityContentScale? = nil,
         contentAlignment: GravityContentAlignment? = nil,
+        verticalAlignment: GravityContentAlignment? = nil,
         layoutWidth: GravityLayoutWidth? = nil,
         positioned: GravityPositioned? = nil,
         weight: Float? = nil,
@@ -65,6 +67,7 @@ public struct Style: Decodable, Equatable {
         self.textStyle = textStyle
         self.fit = fit
         self.contentAlignment = contentAlignment
+        self.verticalAlignment = verticalAlignment
         self.layoutWidth = layoutWidth
         self.positioned = positioned
         self.weight = weight
@@ -75,7 +78,7 @@ public struct Style: Decodable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
         case backgroundColor, backgroundImage, backgroundFit, pressColor, outlineColor, cornerRadius, size, margin, padding
-        case fontSize, fontWeight, textColor, textcolor, textStyle, fit, contentAlignment, layoutWidth
+        case fontSize, fontWeight, textColor, textcolor, textStyle, fit, contentAlignment, verticalAlignment, layoutWidth
         case positioned, weight, productContainerType, gridColumns, rowSpacing
     }
 
@@ -103,6 +106,7 @@ public struct Style: Decodable, Equatable {
         padding = try? container.decodeIfPresent(GravityPadding.self, forKey: .padding)
         textStyle = try? container.decodeIfPresent(GravityTextStyle.self, forKey: .textStyle)
         contentAlignment = try? container.decodeIfPresent(GravityContentAlignment.self, forKey: .contentAlignment)
+        verticalAlignment = try? container.decodeIfPresent(GravityContentAlignment.self, forKey: .verticalAlignment)
         layoutWidth = try? container.decodeIfPresent(GravityLayoutWidth.self, forKey: .layoutWidth)
         positioned = try? container.decodeIfPresent(GravityPositioned.self, forKey: .positioned)
         weight = try? container.decodeIfPresent(Float.self, forKey: .weight)

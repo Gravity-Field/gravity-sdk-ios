@@ -11,6 +11,7 @@ public enum Action: Decodable, Equatable {
     case followDeeplink
     case requestPush
     case requestTracking
+    case openStep
     case unknown(String)
     
     public init(from decoder: Decoder) throws {
@@ -28,6 +29,7 @@ public enum Action: Decodable, Equatable {
         case "follow_deeplink": self = .followDeeplink
         case "request_push": self = .requestPush
         case "request_tracking": self = .requestTracking
+        case "open_step": self = .openStep
         default: self = .unknown(rawValue)
         }
     }

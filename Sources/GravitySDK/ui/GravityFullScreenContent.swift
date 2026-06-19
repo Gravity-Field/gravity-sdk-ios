@@ -4,6 +4,7 @@ struct GravityFullScreenContent: View {
     let content: CampaignContent
     let campaign: Campaign
     let onClickCallback: (OnClickModel) -> Void
+    var item: Item? = nil
 
     private var frameUi: FrameUI? {
         content.variables?.frameUI
@@ -25,6 +26,10 @@ struct GravityFullScreenContent: View {
         style?.contentAlignment?.toHorizontalAlignment()
                                 ?? HorizontalAlignment.center
     }
+
+    private var verticalAlignment: Alignment {
+        style?.verticalAlignment?.toAlignment() ?? .top
+    }
     
     private var close: Close? {
         frameUi?.close
@@ -37,10 +42,11 @@ struct GravityFullScreenContent: View {
                     GravityElements(
                         content: content,
                         campaign: campaign,
-                        onClickCallback: onClickCallback
+                        onClickCallback: onClickCallback,
+                        item: item
                     )
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: verticalAlignment)
                 .applyIf(padding != nil) {
                     $0.padding(.init(
                         top: padding!.top,
