@@ -34,7 +34,7 @@ struct GravityElements: View {
                     }
             case .productsContainer:
                 if let slots = content.products?.slots {
-                    switch element.style.productContainerType {
+                    switch element.style.productContainerType ?? .row {
                     case .row:
                         ProductsRow(
                             element: element,
