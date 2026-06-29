@@ -11,6 +11,9 @@ struct GravityImage: View {
     private var fit: GravityContentScale {
         style.fit ?? .crop
     }
+    private var hasDeterminedWidth: Bool {
+        style.size?.width != nil || style.layoutWidth == .matchParent
+    }
     private var resolvedSrc: String? {
         if let item = item, let key = element.src {
             return item.values[key]
@@ -26,7 +29,15 @@ struct GravityImage: View {
             if let url = url {
                 AsyncUIImage(url: url) { uiImage in
                     if let uiImage {
-                        GravityScaledImageView(uiImage: uiImage, fit: fit)
+                        if style.size?.height != nil {
+                            GravityScaledImageView(uiImage: uiImage, fit: fit)
+                        } else if hasDeterminedWidth {
+                            Image(uiImage: uiImage)
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                        } else {
+                            Image(uiImage: uiImage)
+                        }
                     } else {
                         Color.clear
                     }

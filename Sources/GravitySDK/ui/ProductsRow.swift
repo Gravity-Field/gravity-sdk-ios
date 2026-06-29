@@ -15,10 +15,24 @@ struct ProductsRow: View {
     private var margin: GravityMargin? {
         style?.margin
     }
+    private var spacing: CGFloat {
+        CGFloat(style?.rowSpacing ?? 8)
+    }
+    private var contentPadding: EdgeInsets {
+        if let padding = style?.padding {
+            return EdgeInsets(
+                top: padding.top,
+                leading: padding.left,
+                bottom: padding.bottom,
+                trailing: padding.right
+            )
+        }
+        return EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16)
+    }
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            LazyHStack(spacing: CGFloat(style?.rowSpacing ?? 0)) {
+            LazyHStack(spacing: spacing) {
                 ForEach(slots.indices, id: \.self) { index in
                     let slot = slots[index]
 
@@ -37,20 +51,10 @@ struct ProductsRow: View {
                     }
                 }
             }
-            .applyIf(style?.padding != nil) {
-                $0.padding(
-                    EdgeInsets(
-                        top: style?.padding?.top ?? 0,
-                        leading: style?.padding?.left ?? 0,
-                        bottom: style?.padding?.bottom ?? 0,
-                        trailing: style?.padding?.right ?? 0
-                    )
-                )
-            }
+            .padding(contentPadding)
         }
         .frame(maxWidth: .infinity)
-        .applyIf(height != nil && GravitySDK.instance.productViewBuilder == nil)
-        {
+        .applyIf(height != nil) {
             $0.frame(height: height!)
         }
         .applyIf(style?.backgroundColor != nil) {

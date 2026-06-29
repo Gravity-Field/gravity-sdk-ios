@@ -22,24 +22,10 @@ struct GravityButton: View {
     }
 
     private var labelFont: Font? {
-        let size = textStyle?.fontSize.map { CGFloat($0) }
-        let weight = textStyle?.fontWeight.map { $0.toWeight() }
-
-        if let base = GravitySDK.instance.customFont {
-            let sized = Font(base.withSize(size ?? UIFont.labelFontSize))
-            return weight.map { sized.weight($0) } ?? sized
-        }
-
-        switch (size, weight) {
-        case let (s?, w?):
-            return .system(size: s, weight: w)
-        case let (s?, nil):
-            return .system(size: s)
-        case let (nil, w?):
-            return .system(size: UIFont.labelFontSize, weight: w)
-        default:
-            return nil
-        }
+        gravityFont(
+            size: textStyle?.fontSize.map { CGFloat($0) },
+            fontWeight: textStyle?.fontWeight
+        )
     }
 
     private var contentAlignment: Alignment {

@@ -12,61 +12,93 @@ final class ProductView: UIView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    override var intrinsicContentSize: CGSize {
-        CGSize(width: 160, height: 210)
-    }
-
     private func setup(slot: Slot) {
-        backgroundColor = .white
-        layer.cornerRadius = 4
-        layer.masksToBounds = true
+        backgroundColor = .clear
 
-        let imageUrl = slot.item["imageUrl"] as? String
+        translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            widthAnchor.constraint(equalToConstant: 164),
+            heightAnchor.constraint(equalToConstant: 250)
+        ])
+
+        let imageUrl = slot.item["image_url"] as? String
         let name = slot.item["name"] as? String ?? ""
         let price = slot.item["price"] as? String ?? ""
-        let oldPrice = slot.item["oldPrice"] as? String
+        let inStock = slot.item["in_stock"] as? Bool ?? false
 
         let imageView = UIImageView()
         imageView.contentMode = .scaleAspectFit
+        imageView.clipsToBounds = true
         imageView.translatesAutoresizingMaskIntoConstraints = false
-        imageView.heightAnchor.constraint(equalToConstant: 112).isActive = true
         loadImage(from: imageUrl, into: imageView)
+
+        let imageContainer = UIView()
+        imageContainer.backgroundColor = UIColor(white: 0.96, alpha: 1)
+        imageContainer.layer.cornerRadius = 16
+        imageContainer.layer.borderWidth = 1
+        imageContainer.layer.borderColor = UIColor(white: 0.88, alpha: 1).cgColor
+        imageContainer.layer.masksToBounds = true
+        imageContainer.setContentHuggingPriority(.defaultLow, for: .vertical)
+        imageContainer.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+        imageContainer.addSubview(imageView)
+        NSLayoutConstraint.activate([
+            imageView.leadingAnchor.constraint(equalTo: imageContainer.leadingAnchor),
+            imageView.trailingAnchor.constraint(equalTo: imageContainer.trailingAnchor),
+            imageView.topAnchor.constraint(equalTo: imageContainer.topAnchor),
+            imageView.bottomAnchor.constraint(equalTo: imageContainer.bottomAnchor)
+        ])
 
         let nameLabel = UILabel()
         nameLabel.text = name
-        nameLabel.font = .systemFont(ofSize: 12)
+        nameLabel.font = .systemFont(ofSize: 14, weight: .medium)
         nameLabel.textColor = .black
         nameLabel.numberOfLines = 2
         nameLabel.lineBreakMode = .byTruncatingTail
 
-        let oldPriceLabel = UILabel()
-        oldPriceLabel.font = .systemFont(ofSize: 11)
-        oldPriceLabel.textColor = UIColor(red: 83.0 / 255.0, green: 88.0 / 255.0, blue: 98.0 / 255.0, alpha: 1)
-        oldPriceLabel.attributedText = NSAttributedString(
-            string: oldPrice ?? "",
-            attributes: [.strikethroughStyle: NSUnderlineStyle.single.rawValue]
-        )
-
         let priceLabel = UILabel()
-        priceLabel.text = price
-        priceLabel.font = .boldSystemFont(ofSize: 12)
-        priceLabel.textColor = .black
+        priceLabel.text = "\(price) ₽"
+        priceLabel.font = .boldSystemFont(ofSize: 16)
+        priceLabel.textColor = inStock
+            ? UIColor(red: 1.0, green: 0.30, blue: 0.30, alpha: 1)
+            : UIColor(white: 0.46, alpha: 1)
 
-        let priceColumn = UIStackView(arrangedSubviews: [oldPriceLabel, priceLabel])
-        priceColumn.axis = .vertical
+        let cartIcon = UIImageView(image: UIImage(systemName: "cart"))
+        cartIcon.tintColor = .systemRed
+        cartIcon.contentMode = .scaleAspectFit
+        cartIcon.setContentHuggingPriority(.required, for: .horizontal)
 
-        let priceRow = UIStackView(arrangedSubviews: [priceColumn, UIView()])
-        priceRow.axis = .horizontal
+        let chipContent = UIStackView(arrangedSubviews: [priceLabel, cartIcon])
+        chipContent.axis = .horizontal
+        chipContent.spacing = 8
+        chipContent.alignment = .center
+        chipContent.translatesAutoresizingMaskIntoConstraints = false
+
+        let chip = UIView()
+        chip.backgroundColor = inStock
+            ? UIColor(red: 1.0, green: 0.90, blue: 0.90, alpha: 1)
+            : UIColor(white: 0.93, alpha: 1)
+        chip.layer.cornerRadius = 12
+        chip.layer.masksToBounds = true
+        chip.addSubview(chipContent)
+        NSLayoutConstraint.activate([
+            chipContent.leadingAnchor.constraint(equalTo: chip.leadingAnchor, constant: 10),
+            chipContent.trailingAnchor.constraint(equalTo: chip.trailingAnchor, constant: -10),
+            chipContent.topAnchor.constraint(equalTo: chip.topAnchor, constant: 4),
+            chipContent.bottomAnchor.constraint(equalTo: chip.bottomAnchor, constant: -4)
+        ])
+
+        let chipRow = UIStackView(arrangedSubviews: [chip, UIView()])
+        chipRow.axis = .horizontal
 
         let stack = UIStackView(arrangedSubviews: [
-            imageView,
-            spacer(height: 6),
-            wrap(nameLabel, horizontalPadding: 12),
+            imageContainer,
             spacer(height: 8),
-            wrap(priceRow, horizontalPadding: 12),
-            UIView()
+            nameLabel,
+            spacer(height: 8),
+            chipRow
         ])
         stack.axis = .vertical
+        stack.alignment = .fill
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
 
@@ -83,19 +115,6 @@ final class ProductView: UIView {
         view.translatesAutoresizingMaskIntoConstraints = false
         view.heightAnchor.constraint(equalToConstant: height).isActive = true
         return view
-    }
-
-    private func wrap(_ view: UIView, horizontalPadding: CGFloat) -> UIView {
-        let container = UIView()
-        view.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(view)
-        NSLayoutConstraint.activate([
-            view.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: horizontalPadding),
-            view.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -horizontalPadding),
-            view.topAnchor.constraint(equalTo: container.topAnchor),
-            view.bottomAnchor.constraint(equalTo: container.bottomAnchor)
-        ])
-        return container
     }
 
     private func loadImage(from urlString: String?, into imageView: UIImageView) {

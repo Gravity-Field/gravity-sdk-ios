@@ -42,7 +42,7 @@ struct ItemsRow: View {
                 }
             }
             .frame(maxWidth: .infinity)
-            .applyIf(height != nil && GravitySDK.instance.productViewBuilder == nil) {
+            .applyIf(height != nil) {
                 $0.frame(height: height!)
             }
             .applyIf(margin != nil) {
