@@ -93,6 +93,22 @@ public class GravitySDK {
     internal var notificationPermissionStatus = NotificationPermissionStatus
         .unknown
 
+    private let presentationLock = NSLock()
+    private var _isPresentationLocked = false
+    private var isPresentationLocked: Bool {
+        get {
+            presentationLock.lock()
+            defer { presentationLock.unlock() }
+            return _isPresentationLocked
+        }
+        set {
+            presentationLock.lock()
+            defer { presentationLock.unlock() }
+            _isPresentationLocked = newValue
+        }
+    }
+    private var presentationLockListener: ((Bool) -> Void)?
+
     private let repository = GravityRepository.instance
     private let contentEventService = ContentEventService.instance
     private let productEventService = ProductEventService.instance
@@ -127,6 +143,42 @@ public class GravitySDK {
         guard checkInitialized() else { return }
 
         self.logListener = listener
+    }
+
+    public func setPresentationLockListener(_ listener: ((Bool) -> Void)?) {
+        guard checkInitialized() else { return }
+
+        presentationLockListener = listener
+    }
+
+    public func lockPresentation() {
+        guard checkInitialized() else { return }
+
+        isPresentationLocked = true
+        GravityLogger.i(
+            prefix: Self.TAG,
+            "Presentation lock called, presentation is now locked"
+        )
+        notifyPresentationLockListener(true)
+    }
+
+    public func unlockPresentation() {
+        guard checkInitialized() else { return }
+
+        isPresentationLocked = false
+        GravityLogger.i(
+            prefix: Self.TAG,
+            "Presentation unlock called, presentation is now unlocked"
+        )
+        notifyPresentationLockListener(false)
+    }
+
+    private func notifyPresentationLockListener(_ isLocked: Bool) {
+        Task {
+            await MainActor.run {
+                self.presentationLockListener?(isLocked)
+            }
+        }
     }
 
     public func trackView(
@@ -310,7 +362,16 @@ public class GravitySDK {
                 return
             }
 
+            if isPresentationLocked {
+                GravityLogger.i(
+                    prefix: Self.TAG,
+                    "Presentation is locked, skipped content for campaign \(campaignId.campaignId)"
+                )
+                return
+            }
+
             await showBackendContent(targetViewController, content, campaign)
+            return
         }
     }
 
@@ -685,6 +746,14 @@ public class GravitySDK {
                 item = content.items?.first(where: { $0.id == itemId })
             } else {
                 item = nil
+            }
+
+            if isPresentationLocked {
+                GravityLogger.i(
+                    prefix: Self.TAG,
+                    "Presentation is locked, skipped content for campaign \(campaign.payload.first?.campaignId ?? "unknown")"
+                )
+                return
             }
 
             Task { @MainActor in

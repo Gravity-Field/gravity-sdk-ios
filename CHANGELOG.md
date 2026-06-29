@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+* Add presentation lock to suppress campaign display
+
 ## 1.0.5
 
 * Remove force unwrap
