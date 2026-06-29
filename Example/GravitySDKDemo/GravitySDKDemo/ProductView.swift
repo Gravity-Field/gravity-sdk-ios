@@ -12,6 +12,10 @@ final class ProductView: UIView {
         fatalError("init(coder:) has not been implemented")
     }
 
+    override var intrinsicContentSize: CGSize {
+        CGSize(width: 164, height: 250)
+    }
+
     private func setup(slot: Slot) {
         backgroundColor = .clear
 
@@ -33,7 +37,7 @@ final class ProductView: UIView {
         loadImage(from: imageUrl, into: imageView)
 
         let imageContainer = UIView()
-        imageContainer.backgroundColor = UIColor(white: 0.96, alpha: 1)
+        imageContainer.backgroundColor = .white
         imageContainer.layer.cornerRadius = 16
         imageContainer.layer.borderWidth = 1
         imageContainer.layer.borderColor = UIColor(white: 0.88, alpha: 1).cgColor
