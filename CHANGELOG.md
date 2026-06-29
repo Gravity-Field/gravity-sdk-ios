@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.0.5
+
 * Remove force unwrap
 * Use child controller for snackbar
 * Make snackbar dismiss idempotent
