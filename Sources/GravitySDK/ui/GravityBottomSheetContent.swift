@@ -38,6 +38,37 @@ struct GravityBottomSheetContent: View {
         style?.backgroundColor ?? Color(.systemBackground)
     }
 
+    private var imagePrerollDelay: TimeInterval {
+        hasUncachedRemoteImage ? 0.25 : 0
+    }
+
+    private var hasUncachedRemoteImage: Bool {
+        if let backgroundImage = style?.backgroundImage,
+           let url = URL(string: backgroundImage),
+           !url.isFileURL,
+           !UIImageLoader.isCached(url)
+        {
+            return true
+        }
+        guard let elements = content.variables?.elements else { return false }
+        return elements.contains { element in
+            guard element.type == .image else { return false }
+            guard let url = imageURL(for: element), !url.isFileURL else { return false }
+            return !UIImageLoader.isCached(url)
+        }
+    }
+
+    private func imageURL(for element: Element) -> URL? {
+        let src: String?
+        if let item = item, let key = element.src {
+            src = item.values[key]
+        } else {
+            src = element.src
+        }
+        guard let src = src else { return nil }
+        return URL(string: src)
+    }
+
     @State private var showSheet = false
 
     var body: some View {
@@ -45,6 +76,7 @@ struct GravityBottomSheetContent: View {
             CustomSheet(
                 isPresented: $showSheet,
                 cornerRadius: style?.cornerRadius ?? 0,
+                imagePrerollDelay: imagePrerollDelay,
                 onDismiss: onDismiss
             ) {
                 ContentVisibilityTracker(content: content, campaign: campaign) {
@@ -105,9 +137,12 @@ struct GravityBottomSheetContent: View {
     }
 }
 
+private let customSheetOpenAnimationDuration: TimeInterval = 0.6
+
 struct CustomSheet<Content: View>: View {
     @Binding var isPresented: Bool
     let cornerRadius: CGFloat
+    let imagePrerollDelay: TimeInterval
     let onDismiss: () -> Void
     @ViewBuilder let content: () -> Content
 
@@ -115,6 +150,7 @@ struct CustomSheet<Content: View>: View {
     @State private var slideOffset: CGFloat = 0
     @State private var dimOpacity: CGFloat = 0
     @State private var dragOffset: CGFloat = 0
+    @State private var revealWindow: GravityImageRevealWindow?
 
     private var screenHeight: CGFloat {
         UIScreen.main.bounds.height
@@ -135,6 +171,7 @@ struct CustomSheet<Content: View>: View {
                     }
 
                 content()
+                    .environment(\.gravityImageRevealWindow, revealWindow)
                     .clipShape(
                         CustomCorner(
                             radius: cornerRadius,
@@ -184,7 +221,13 @@ struct CustomSheet<Content: View>: View {
         dimOpacity = 0
         dragOffset = 0
 
-        DispatchQueue.main.async {
+        let start = Date().addingTimeInterval(imagePrerollDelay)
+        revealWindow = GravityImageRevealWindow(
+            animationStart: start,
+            animationEnd: start.addingTimeInterval(customSheetOpenAnimationDuration)
+        )
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + imagePrerollDelay) {
             withAnimation(.spring()) {
                 slideOffset = 0
                 dimOpacity = 0.3

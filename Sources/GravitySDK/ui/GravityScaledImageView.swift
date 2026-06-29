@@ -110,6 +110,7 @@ struct GravityScaledImageView: View {
 struct AsyncUIImage<Content: View>: View {
     private let url: URL
     private let content: (UIImage?) -> Content
+    @Environment(\.gravityImageRevealWindow) private var revealWindow
     @StateObject private var imageLoader = UIImageLoader()
 
     init(
@@ -123,12 +124,17 @@ struct AsyncUIImage<Content: View>: View {
     var body: some View {
         content(imageLoader.uiImage)
             .onAppear {
-                imageLoader.load(url: url)
+                imageLoader.load(url: url, revealWindow: revealWindow)
             }
             .onChange(of: url) { url in
-                imageLoader.load(url: url)
+                imageLoader.load(url: url, revealWindow: revealWindow)
             }
     }
+}
+
+struct GravityImageRevealWindow: Equatable {
+    let animationStart: Date
+    let animationEnd: Date
 }
 
 final class UIImageLoader: ObservableObject {
@@ -136,7 +142,11 @@ final class UIImageLoader: ObservableObject {
 
     private static let cache = NSCache<NSURL, UIImage>()
 
-    func load(url: URL) {
+    static func isCached(_ url: URL) -> Bool {
+        cache.object(forKey: url as NSURL) != nil
+    }
+
+    func load(url: URL, revealWindow: GravityImageRevealWindow? = nil) {
         if let cached = Self.cache.object(forKey: url as NSURL) {
             uiImage = cached
             return
@@ -148,7 +158,7 @@ final class UIImageLoader: ObservableObject {
                 ?? (try? Data(contentsOf: url)).flatMap({ UIImage(data: $0) })
             {
                 Self.cache.setObject(image, forKey: url as NSURL)
-                uiImage = image
+                applyImage(image, revealWindow: revealWindow)
             }
             return
         }
@@ -157,9 +167,36 @@ final class UIImageLoader: ObservableObject {
             guard let data = data, let image = UIImage(data: data) else { return }
             Self.cache.setObject(image, forKey: url as NSURL)
             DispatchQueue.main.async { [weak self] in
-                self?.uiImage = image
+                self?.applyImage(image, revealWindow: revealWindow)
             }
         }
         .resume()
+    }
+
+    private func applyImage(_ image: UIImage, revealWindow: GravityImageRevealWindow?) {
+        guard let window = revealWindow else {
+            uiImage = image
+            return
+        }
+        let now = Date()
+        if now <= window.animationStart || now >= window.animationEnd {
+            uiImage = image
+            return
+        }
+        let remaining = window.animationEnd.timeIntervalSince(now)
+        DispatchQueue.main.asyncAfter(deadline: .now() + remaining) { [weak self] in
+            self?.uiImage = image
+        }
+    }
+}
+
+private struct GravityImageRevealWindowKey: EnvironmentKey {
+    static let defaultValue: GravityImageRevealWindow? = nil
+}
+
+extension EnvironmentValues {
+    var gravityImageRevealWindow: GravityImageRevealWindow? {
+        get { self[GravityImageRevealWindowKey.self] }
+        set { self[GravityImageRevealWindowKey.self] = newValue }
     }
 }
