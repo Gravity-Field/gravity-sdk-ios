@@ -5,6 +5,20 @@
 * Remove force unwrap
 * Use child controller for snackbar
 * Make snackbar dismiss idempotent
+* Add custom font
+* Add background image
+* Fix bottom sheet layout
+* Add GravityWebView
+* Add loader to inline view
+* Add verticalAlignment to Style for content alignment
+* Add element with type ITEMS_CONTAINER and campaign steps logic
+* Support layoutWidth in GravityText
+* Add GravityInlineListView
+* Fallback products container type to row
+* Fix products container layout
+* Fix image sizing without height
+* Fix custom font weight
+* Fix image rendering
 
 ## 1.0.4
 
