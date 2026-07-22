@@ -35,6 +35,10 @@ struct GravityText: View {
             fontWeight: style?.fontWeight
         )
     }
+
+    private var isMatchParent: Bool {
+        style?.layoutWidth == .matchParent
+    }
     
     var body: some View {
         Text(resolvedText)
@@ -43,22 +47,25 @@ struct GravityText: View {
             .applyIf(labelFont != nil) {
                 $0.font(labelFont!)
             }
-            .applyIf(style?.margin != nil) {
+            .applyIf(style?.padding != nil) {
                 $0.padding(.init(
-                    top: style!.margin!.top,
-                    leading: style!.margin!.left,
-                    bottom: style!.margin!.bottom,
-                    trailing: style!.margin!.right
+                    top: style!.padding!.top,
+                    leading: style!.padding!.left,
+                    bottom: style!.padding!.bottom,
+                    trailing: style!.padding!.right
                 ))
             }
-            .applyIf(style?.size?.width != nil) {
+            .applyIf(style?.size?.width != nil && !isMatchParent) {
                 $0.frame(width: style!.size!.width!, alignment: frameAlignment)
             }
             .applyIf(style?.size?.height != nil) {
                 $0.frame(height: style!.size!.height!)
             }
-            .applyIf(style?.layoutWidth == .matchParent) {
+            .applyIf(isMatchParent) {
                 $0.frame(maxWidth: .infinity, alignment: frameAlignment)
+            }
+            .applyIf(style?.size?.height == nil) {
+                $0.fixedSize(horizontal: false, vertical: true)
             }
             .applyIf(element.onClick != nil) {
                 $0.onTapGesture {
@@ -66,6 +73,14 @@ struct GravityText: View {
                         onClickCallback(onClick)
                     }
                 }
+            }
+            .applyIf(style?.margin != nil) {
+                $0.padding(.init(
+                    top: style!.margin!.top,
+                    leading: style!.margin!.left,
+                    bottom: style!.margin!.bottom,
+                    trailing: style!.margin!.right
+                ))
             }
     }
 }
