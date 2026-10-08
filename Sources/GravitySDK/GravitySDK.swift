@@ -14,6 +14,8 @@ public class GravitySDK {
     internal let productViewBuilder: ProductViewBuilder?
     internal let productFilter: ProductFilter?
     internal let customFont: UIFont?
+    private let inAppPreparation: InAppPreparation?
+    private let presentationRevision = PresentationRevision()
 
     private init(
         apiKey: String,
@@ -21,13 +23,15 @@ public class GravitySDK {
         gravityEventCallback: GravityEventCallback?,
         productViewBuilder: ProductViewBuilder?,
         productFilter: ProductFilter?,
-        uiSettings: UISettings?
+        uiSettings: UISettings?,
+        inAppPreparation: InAppPreparation? = nil
     ) {
         self.apiKey = apiKey
         self.section = section
         self.gravityEventCallback = gravityEventCallback
         self.productViewBuilder = productViewBuilder
         self.productFilter = productFilter
+        self.inAppPreparation = inAppPreparation
 
         if let fontName = uiSettings?.fontName {
             let font = UIFont(name: fontName, size: UIFont.labelFontSize)
@@ -74,6 +78,21 @@ public class GravitySDK {
         uiSettings: UISettings? = nil,
         logLevel: LogLevel = .error
     ) {
+        initialize(apiKey: apiKey, section: section, gravityEventCallback: gravityEventCallback,
+                   productViewBuilder: productViewBuilder, productFilter: productFilter,
+                   uiSettings: uiSettings, logLevel: logLevel, inAppPreparation: nil)
+    }
+
+    public static func initialize(
+        apiKey: String,
+        section: String,
+        gravityEventCallback: GravityEventCallback? = nil,
+        productViewBuilder: ProductViewBuilder? = nil,
+        productFilter: ProductFilter? = nil,
+        uiSettings: UISettings? = nil,
+        logLevel: LogLevel = .error,
+        inAppPreparation: InAppPreparation?
+    ) {
         GravityLogger.configure(logLevel)
         _instance = GravitySDK(
             apiKey: apiKey,
@@ -81,7 +100,8 @@ public class GravitySDK {
             gravityEventCallback: gravityEventCallback,
             productViewBuilder: productViewBuilder,
             productFilter: productFilter,
-            uiSettings: uiSettings
+            uiSettings: uiSettings,
+            inAppPreparation: inAppPreparation
         )
     }
 
@@ -129,6 +149,7 @@ public class GravitySDK {
         guard checkInitialized() else { return }
 
         user = User(custom: userId, ses: sessionId)
+        presentationRevision.invalidate()
     }
 
     public func setNotificationPermissionStatus(
@@ -155,6 +176,7 @@ public class GravitySDK {
         guard checkInitialized() else { return }
 
         isPresentationLocked = true
+        presentationRevision.invalidate()
         GravityLogger.i(
             prefix: Self.TAG,
             "Presentation lock called, presentation is now locked"
@@ -187,6 +209,8 @@ public class GravitySDK {
     ) {
         guard checkInitialized() else { return }
 
+        let revision = presentationRevision.current
+
         Task {
             do {
                 guard
@@ -199,7 +223,8 @@ public class GravitySDK {
                 try await handleCampaignIdsResponse(
                     campaignIdsResponse,
                     pageContext,
-                    viewController
+                    viewController,
+                    revision: revision
                 )
             } catch {
                 GravityLogger.e(Self.TAG, "trackView error:  \(error)")
@@ -214,6 +239,8 @@ public class GravitySDK {
     ) {
         guard checkInitialized() else { return }
 
+        let revision = presentationRevision.current
+
         Task {
             do {
                 guard
@@ -227,7 +254,8 @@ public class GravitySDK {
                 try await handleCampaignIdsResponse(
                     campaignIdsResponse,
                     pageContext,
-                    viewController
+                    viewController,
+                    revision: revision
                 )
             } catch {
                 GravityLogger.e(Self.TAG, "triggerEvent error:  \(error)")
@@ -304,7 +332,8 @@ public class GravitySDK {
     private func handleCampaignIdsResponse(
         _ response: CampaignIdsResponse,
         _ pageContext: PageContext,
-        _ viewController: UIViewController? = nil
+        _ viewController: UIViewController? = nil,
+        revision: UInt64
     ) async throws {
         let targetViewController: UIViewController?
         if let viewController {
@@ -321,6 +350,7 @@ public class GravitySDK {
         }
 
         for campaignId in sortedByPriority {
+            guard presentationRevision.current == revision else { return }
             guard
                 let result = await getContentByCampaignId(
                     campaignId.campaignId,
@@ -370,9 +400,44 @@ public class GravitySDK {
                 return
             }
 
-            await showBackendContent(targetViewController, content, campaign)
-            return
+            if await prepareAndShowBackendContent(
+                targetViewController, content, campaign, revision: revision
+            ) {
+                return
+            }
         }
+    }
+
+    @MainActor private func prepareAndShowBackendContent(
+        _ viewController: UIViewController,
+        _ content: CampaignContent,
+        _ campaign: Campaign,
+        revision: UInt64,
+        item: Item? = nil
+    ) async -> Bool {
+        guard canPresent(viewController, revision: revision) else { return false }
+
+        let prepared: CampaignContent
+        if let preparation = inAppPreparation {
+            guard let result = await preparation.prepare(content, campaign) else {
+                GravityLogger.i(prefix: Self.TAG, "In-app preparation skipped content \(content.contentId)")
+                return false
+            }
+            prepared = result
+        } else {
+            prepared = content
+        }
+
+        // Revalidate on the UI actor immediately before presenting, after the asynchronous work.
+        guard canPresent(viewController, revision: revision) else { return false }
+        showBackendContent(viewController, prepared, campaign, item: item)
+        return true
+    }
+
+    @MainActor private func canPresent(_ viewController: UIViewController, revision: UInt64) -> Bool {
+        presentationRevision.canPresent(expected: revision,
+            active: isViewControllerActive(viewController), locked: isPresentationLocked,
+            cancelled: Task.isCancelled)
     }
 
     public func sendContentEngagement(engagement: ContentEngagement) {
@@ -756,11 +821,13 @@ public class GravitySDK {
                 return
             }
 
+            let revision = presentationRevision.current
             Task { @MainActor in
-                self.showBackendContent(
+                await self.prepareAndShowBackendContent(
                     viewController,
                     targetContent,
                     campaign,
+                    revision: revision,
                     item: item
                 )
             }

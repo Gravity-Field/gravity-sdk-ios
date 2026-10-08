@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add optional asynchronous in-app preparation, deadline and per-content skip.
+- Preserve original product slots and tracking when filtering review prompts.
+- Revalidate presentation after preparation and invalidate pending work on user changes or presentation lock.
+- Add a purchase-review integration example and regression tests.
+
 ## 1.0.6
 
 * Add presentation lock to suppress campaign display
