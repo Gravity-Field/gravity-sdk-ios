@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add `dismissInApp(contentId:completion:)` for targeted dismissal from the existing ProductViewBuilder; navigate after dismissal and track close once.
+
 - Add optional asynchronous in-app preparation, deadline and per-content skip.
 - Preserve original product slots and tracking when filtering review prompts.
 - Revalidate presentation after preparation and invalidate pending work on user changes or presentation lock.

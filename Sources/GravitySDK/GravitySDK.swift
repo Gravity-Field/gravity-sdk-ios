@@ -16,6 +16,7 @@ public class GravitySDK {
     internal let customFont: UIFont?
     private let inAppPreparation: InAppPreparation?
     private let presentationRevision = PresentationRevision()
+    private let inAppPresentations = InAppPresentationRegistry()
 
     private init(
         apiKey: String,
@@ -490,6 +491,33 @@ public class GravitySDK {
         }
     }
 
+    /// Closes the visible SDK in-app with this contentId. Completion runs on the UI thread
+    /// after dismissal; false means no matching presentation was available. Inline widgets are unaffected.
+    public func dismissInApp(contentId: String, completion: @escaping (Bool) -> Void = { _ in }) {
+        guard checkInitialized() else {
+            Task { @MainActor in completion(false) }
+            return
+        }
+        Task { @MainActor in
+            self.inAppPresentations.dismiss(contentId: contentId, completion: completion)
+        }
+    }
+
+    @MainActor private func registerInApp(
+        _ content: CampaignContent, _ campaign: Campaign,
+        performDismiss: @escaping (@escaping (Bool) -> Void) -> Void
+    ) -> InAppPresentation {
+        weak var registered: InAppPresentation?
+        let presentation = InAppPresentation(performDismiss: performDismiss) { [weak self] success in
+            guard let self = self else { return }
+            self.inAppPresentations.remove(registered, contentId: content.contentId)
+            if success { self.contentEventService.sendContentClosed(content, campaign) }
+        }
+        registered = presentation
+        inAppPresentations.register(presentation, contentId: content.contentId)
+        return presentation
+    }
+
     public func getContentByCampaignId(
         _ campaignId: String,
         _ pageContext: PageContext
@@ -545,9 +573,15 @@ public class GravitySDK {
         _ viewController: UIViewController,
         item: Item? = nil
     ) {
+        weak var presentedController: UIViewController?
+        let presentation = registerInApp(content, campaign) { complete in
+            guard let controller = presentedController, controller.presentingViewController != nil else {
+                complete(false); return
+            }
+            controller.dismiss(animated: true) { complete(true) }
+        }
         func dismiss() {
-            contentEventService.sendContentClosed(content, campaign)
-            viewController.dismiss(animated: true)
+            presentation.close()
         }
 
         let fullScreenView = GravityFullScreenContent(
@@ -566,6 +600,7 @@ public class GravitySDK {
         )
 
         let hostingController = UIHostingController(rootView: fullScreenView)
+        presentedController = hostingController
         hostingController.modalPresentationStyle = .fullScreen
 
         viewController.present(hostingController, animated: true)
@@ -577,9 +612,15 @@ public class GravitySDK {
         _ viewController: UIViewController,
         item: Item? = nil
     ) {
+        weak var presentedController: UIViewController?
+        let presentation = registerInApp(content, campaign) { complete in
+            guard let controller = presentedController, controller.presentingViewController != nil else {
+                complete(false); return
+            }
+            controller.dismiss(animated: true) { complete(true) }
+        }
         func dismiss() {
-            contentEventService.sendContentClosed(content, campaign)
-            viewController.dismiss(animated: true)
+            presentation.close()
         }
 
         let modalView = GravityModalContent(
@@ -599,6 +640,7 @@ public class GravitySDK {
         )
 
         let hostingController = UIHostingController(rootView: modalView)
+        presentedController = hostingController
         hostingController.modalPresentationStyle = .overFullScreen
         hostingController.modalTransitionStyle = .crossDissolve
         hostingController.view.backgroundColor = .clear
@@ -613,10 +655,33 @@ public class GravitySDK {
         item: Item? = nil
     ) {
         var requestClose: (() -> Void)?
+        weak var presentedController: UIViewController?
+        var animationFinished = false
+        var pendingCompletion: ((Bool) -> Void)?
+        let presentation = registerInApp(content, campaign) { complete in
+            guard let controller = presentedController, controller.presentingViewController != nil else {
+                complete(false); return
+            }
+            if !animationFinished, let close = requestClose {
+                pendingCompletion = complete
+                close()
+            } else {
+                controller.dismiss(animated: false) { complete(true) }
+            }
+        }
 
-        func dismiss() {
-            contentEventService.sendContentClosed(content, campaign)
-            viewController.dismiss(animated: false)
+        func finishDismiss() {
+            animationFinished = true
+            if let complete = pendingCompletion {
+                pendingCompletion = nil
+                guard let controller = presentedController, controller.presentingViewController != nil else {
+                    complete(false); return
+                }
+                controller.dismiss(animated: false) { complete(true) }
+            } else {
+                // Drag/backdrop dismissal has already finished the sheet animation.
+                presentation.close()
+            }
         }
 
         let fullScreenView = GravityBottomSheetContent(
@@ -629,14 +694,15 @@ public class GravitySDK {
                     content: content,
                     campaign: campaign,
                     viewController: viewController,
-                    dismissCallback: { requestClose?() }
+                    dismissCallback: { presentation.close() }
                 )
             },
-            onDismiss: dismiss,
+            onDismiss: finishDismiss,
             item: item
         )
 
         let hostingController = UIHostingController(rootView: fullScreenView)
+        presentedController = hostingController
         hostingController.modalPresentationStyle = .overFullScreen
         hostingController.view.backgroundColor = .clear
 
@@ -654,17 +720,16 @@ public class GravitySDK {
         weak var weakHostingController:
             UIHostingController<GravitySnackbarContent>?
 
-        var isDismissed = false
-
-        func dismiss() {
-            guard !isDismissed else { return }
-            isDismissed = true
-
-            contentEventService.sendContentClosed(content, campaign)
-            guard let hostingController = weakHostingController else { return }
+        let presentation = registerInApp(content, campaign) { complete in
+            guard let hostingController = weakHostingController,
+                  hostingController.view.superview != nil else { complete(false); return }
             hostingController.willMove(toParent: nil)
             hostingController.view.removeFromSuperview()
             hostingController.removeFromParent()
+            complete(true)
+        }
+        func dismiss() {
+            presentation.close()
         }
 
         let snackbarView = GravitySnackbarContent(

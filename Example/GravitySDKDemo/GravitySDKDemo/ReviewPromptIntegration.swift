@@ -79,7 +79,9 @@ private struct ReviewProductViewBuilder: ProductViewBuilder {
                     GravitySDK.instance.sendProductEngagement(
                         engagement: ProductClickEngagement(slot: slot, content: content, campaign: campaign)
                     )
-                    onOpenReview(sku)
+                    GravitySDK.instance.dismissInApp(contentId: content.contentId) { dismissed in
+                        if dismissed { onOpenReview(sku) }
+                    }
                 }
             }
             .frame(width: 160)

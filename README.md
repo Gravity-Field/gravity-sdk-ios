@@ -159,7 +159,7 @@ GravitySDK.initialize(
 )
 ```
 
-[Пример ReviewPromptIntegration](Example/GravitySDKDemo/GravitySDKDemo/ReviewPromptIntegration.swift) включает интерфейс клиентского API eligibility, карточку с кнопкой «Оставить отзыв» и обновление локального статуса через `didSubmitReview(sku:)` после успешной отправки отзыва. `onOpenReview` — маршрутизация приложения: клиент закрывает текущий sheet и открывает свой экран отзыва. Пример не включён по умолчанию: для него нужен API клиента.
+[Пример ReviewPromptIntegration](Example/GravitySDKDemo/GravitySDKDemo/ReviewPromptIntegration.swift) включает интерфейс клиентского API eligibility, карточку с кнопкой «Оставить отзыв» и обновление локального статуса через `didSubmitReview(sku:)` после успешной отправки отзыва. Карточка вызывает `dismissInApp`; SDK закрывает sheet и затем вызывает `onOpenReview` для маршрутизации приложения. Пример не включён по умолчанию: для него нужен API клиента.
 
 Обработчик можно написать напрямую:
 
@@ -187,3 +187,21 @@ let preparation = InAppPreparation(timeout: 5) { content, campaign in
 - Пропущенный in-app не отправляет impression/visible impression; content-loaded сохраняет семантику загрузки. Удалённые слоты не монтируются. В своём builder отправляйте клик через `sendProductEngagement`.
 - Используйте recently purchased без fallback на непокупавшиеся товары. Правила доставки/отмены/возврата проверяет API eligibility. Запрашивайте кандидатов с запасом: SDK не восполняет удалённые товары.
 - Перед запуском проверьте пользователя в `/choose` (отдельное исправление EGO-246). Клиентский статус отзывов должен принадлежать текущему аккаунту.
+
+## Закрытие in-app из обычного ProductViewBuilder
+
+Публичный `dismissInApp(contentId:completion:)` закрывает только показанный SDK in-app с указанным `contentId`: modal, bottom sheet, full screen или snackbar. Inline-реквиджеты не закрываются. Тип и сигнатура `ProductViewBuilder` не меняются.
+
+В обработчике кнопки сначала отправьте product click, затем запросите закрытие:
+
+```swift
+GravitySDK.instance.sendProductEngagement(engagement:
+    ProductClickEngagement(slot: slot, content: content, campaign: campaign))
+GravitySDK.instance.dismissInApp(contentId: content.contentId) { dismissed in
+    if dismissed { onOpenReview(sku) }
+}
+```
+
+При успешном закрытии completion вызывается на UI-потоке после анимации и удаления in-app с результатом `true`. Если контент не показан, уже закрывается/закрыт или отсутствует, completion получает `false` без ожидания закрытия. При повторном клике пока идёт закрытие возвращается `false`, чтобы не открывать форму дважды. Close-событие отправляет SDK один раз; вручную отправлять его не нужно. Если нужен переход и при отсутствии in-app, обработайте `false` в своей навигации.
+
+Метод сам не отправляет product click. Кнопку отзывов по-прежнему выбирайте по кампании и используйте текущий builder для обычных рекомендаций.

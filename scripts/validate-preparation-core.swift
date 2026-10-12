@@ -1,4 +1,4 @@
-// Runs without Xcode/XCTest: swiftc Sources/GravitySDK/utils/{PreparationDeadline,PresentationRevision}.swift
+// Runs without Xcode/XCTest: swiftc Sources/GravitySDK/utils/{PreparationDeadline,PresentationRevision,InAppPresentation}.swift
 // scripts/validate-preparation-core.swift -o /tmp/gravity-preparation-check && /tmp/gravity-preparation-check
 import Foundation
 
@@ -53,6 +53,25 @@ import Foundation
             let immediate = await PreparationDeadline.run(timeout: 0.1) { 7 }
             precondition(immediate == 7)
         }
-        print("PASS: value, error, timeout, late completion, cancellation, presentation gate, 200 races")
+        let registry = InAppPresentationRegistry()
+        var events: [String] = []
+        var finish: ((Bool) -> Void)?
+        let a = InAppPresentation(performDismiss: { events.append("animate"); finish = $0 },
+                                 didDismiss: { _ in events.append("close") })
+        let b = InAppPresentation(performDismiss: { _ in preconditionFailure("Wrong target") },
+                                 didDismiss: { _ in })
+        registry.register(a, contentId: "A")
+        registry.register(b, contentId: "B")
+        registry.dismiss(contentId: "A") { success in precondition(success); events.append("navigate") }
+        precondition(events == ["animate"])
+        registry.dismiss(contentId: "A") { precondition(!$0) }
+        finish?(true)
+        finish?(true)
+        precondition(events == ["animate", "close", "navigate"])
+        registry.dismiss(contentId: "inline") { precondition(!$0) }
+        registry.remove(a, contentId: "A")
+        registry.dismiss(contentId: "A") { precondition(!$0) }
+
+        print("PASS: preparation/gate, 200 races, targeted dismissal, callback ordering, duplicate close, inline unaffected")
     }
 }
