@@ -25,14 +25,20 @@ final class ReviewPromptIntegration {
 
     func preparation() -> InAppPreparation {
         InAppPreparation(timeout: 5) { [self] content, campaign in
-            guard campaign.selector == selector else { return content }
-            let skus = content.products?.slots?.compactMap { $0.item["sku"] as? String } ?? []
-            guard !skus.isEmpty else { return nil }
-            let eligible = try await api.eligibleSkus(Array(Set(skus)))
-            return content.filteringProducts { slot in
-                guard let sku = slot.item["sku"] as? String else { return false }
-                return eligible.contains(sku) && !status.contains(sku)
-            }
+            try await recommendedContent(for: content, campaign: campaign)
+        }
+    }
+
+    /// The decision logic behind `preparation()`, exposed directly so it can be exercised
+    /// without going through the SDK's network/presentation pipeline (see the demo's test console).
+    func recommendedContent(for content: CampaignContent, campaign: Campaign) async throws -> CampaignContent? {
+        guard campaign.selector == selector else { return content }
+        let skus = content.products?.slots?.compactMap { $0.item["sku"] as? String } ?? []
+        guard !skus.isEmpty else { return nil }
+        let eligible = try await api.eligibleSkus(Array(Set(skus)))
+        return content.filteringProducts { slot in
+            guard let sku = slot.item["sku"] as? String else { return false }
+            return eligible.contains(sku) && !status.contains(sku)
         }
     }
 
@@ -72,19 +78,52 @@ private struct ReviewProductViewBuilder: ProductViewBuilder {
             return fallback.build(slot: slot, content: content, campaign: campaign)
         }
         let sku = slot.item["sku"] as? String ?? ""
+        let name = slot.item["name"] as? String ?? sku
+        let price = slot.item["price"] as? String
+        let imageURL = (slot.item["image_url"] as? String).flatMap(URL.init(string:))
+
         return AnyView(
-            VStack(alignment: .leading, spacing: 12) {
-                Text(slot.item["name"] as? String ?? sku)
-                Button("Оставить отзыв") {
+            VStack(alignment: .leading, spacing: 8) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12).fill(Color(.systemGray6))
+                    if let imageURL {
+                        AsyncImage(url: imageURL) { image in
+                            image.resizable().aspectRatio(contentMode: .fit).padding(6)
+                        } placeholder: {
+                            ProgressView()
+                        }
+                    }
+                }
+                .frame(height: 110)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+
+                Text(name)
+                    .font(.caption)
+                    .lineLimit(2)
+                    .frame(height: 32, alignment: .top)
+
+                if let price {
+                    Text("\(price) ₽").font(.caption.bold())
+                }
+
+                Button {
                     GravitySDK.instance.sendProductEngagement(
                         engagement: ProductClickEngagement(slot: slot, content: content, campaign: campaign)
                     )
                     GravitySDK.instance.dismissInApp(contentId: content.contentId) { dismissed in
                         if dismissed { onOpenReview(sku) }
                     }
+                } label: {
+                    Text("Оставить отзыв")
+                        .font(.caption.weight(.semibold))
+                        .frame(maxWidth: .infinity)
                 }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
             }
-            .frame(width: 160)
+            .padding(10)
+            .frame(width: 150)
+            .background(RoundedRectangle(cornerRadius: 14).fill(Color(.secondarySystemBackground)))
         )
     }
 }
