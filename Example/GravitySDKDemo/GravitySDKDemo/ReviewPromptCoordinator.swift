@@ -57,8 +57,14 @@ final class ReviewPromptCoordinator: ObservableObject {
     }
 
     /// Demo-only affordance so the real flow can be re-tested without reinstalling the app.
-    func logReviewStatusReset() {
-        appendLog("ReviewStatusStore сброшен — все SKU снова доступны для отзыва")
+    /// Must clear both stores: `ReviewStatusStore` is what `DemoReviewEligibilityAPI` actually
+    /// consults, but `integration` also keeps its own in-session `SubmittedReviews` cache
+    /// (updated optimistically by `didSubmitReview` above) — clearing only the backend-side store
+    /// would leave a SKU excluded by that cache until the next app launch.
+    func resetReviewStatus() {
+        ReviewStatusStore.shared.reset()
+        integration.clearSubmittedReviews()
+        appendLog("ReviewStatusStore и in-memory статус сброшены — все SKU снова доступны для отзыва")
     }
 
     /// `fetchAndPreviewBySelector()` below never has a live SDK-presented in-app to close —

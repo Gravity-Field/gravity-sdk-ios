@@ -51,6 +51,15 @@ final class ReviewPromptIntegration {
     func didSubmitReview(sku: String) {
         status.insert(sku)
     }
+
+    /// `status` is an optimistic cache layered on top of `api` (the client's own backend) — a
+    /// real app wouldn't normally need to clear it directly, since it just mirrors the backend's
+    /// state until the next successful `eligibleSkus` call. This exists for demo/testing: if the
+    /// backend-side status is reset out of band (e.g. `ReviewStatusStore.reset()`), this cache
+    /// would otherwise keep excluding the SKU until the next `didSubmitReview`-free app launch.
+    func clearSubmittedReviews() {
+        status.removeAll()
+    }
 }
 
 private final class SubmittedReviews {
@@ -64,6 +73,11 @@ private final class SubmittedReviews {
     func insert(_ sku: String) {
         lock.lock()
         skus.insert(sku)
+        lock.unlock()
+    }
+    func removeAll() {
+        lock.lock()
+        skus.removeAll()
         lock.unlock()
     }
 }
