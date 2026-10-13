@@ -418,21 +418,28 @@ public class GravitySDK {
     ) async -> Bool {
         guard canPresent(viewController, revision: revision) else { return false }
 
-        let prepared: CampaignContent
-        if let preparation = inAppPreparation {
-            guard let result = await preparation.prepare(content, campaign) else {
-                GravityLogger.i(prefix: Self.TAG, "In-app preparation skipped content \(content.contentId)")
-                return false
-            }
-            prepared = result
-        } else {
-            prepared = content
+        guard let prepared = await Self.resolvedContent(content, campaign, preparation: inAppPreparation) else {
+            GravityLogger.i(prefix: Self.TAG, "In-app preparation skipped content \(content.contentId)")
+            return false
         }
 
         // Revalidate on the UI actor immediately before presenting, after the asynchronous work.
         guard canPresent(viewController, revision: revision) else { return false }
         showBackendContent(viewController, prepared, campaign, item: item)
         return true
+    }
+
+    /// Without a preparation handler, campaigns pass through unchanged — existing campaigns and
+    /// `productFilter` keep their current behavior. Extracted as a pure, static function so the
+    /// no-handler passthrough and the delegation to `InAppPreparation.prepare` are directly
+    /// testable without the surrounding network/presentation pipeline.
+    internal static func resolvedContent(
+        _ content: CampaignContent,
+        _ campaign: Campaign,
+        preparation: InAppPreparation?
+    ) async -> CampaignContent? {
+        guard let preparation else { return content }
+        return await preparation.prepare(content, campaign)
     }
 
     @MainActor private func canPresent(_ viewController: UIViewController, revision: UInt64) -> Bool {

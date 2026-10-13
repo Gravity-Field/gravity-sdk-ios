@@ -7,11 +7,12 @@ struct GravitySDKDemoApp: App {
 
     init() {
         GravitySDK.initialize(
-            apiKey:"",
-            section: "",
+            apiKey:"your-api-key",
+           section: "your-section-id",
             gravityEventCallback: { event in },
-            productViewBuilder: DemoProductViewBuilder(),
-            logLevel: LogLevel.debug
+            productViewBuilder: ReviewPromptCoordinator.shared.integration.productViewBuilder,
+            logLevel: LogLevel.debug,
+            inAppPreparation: ReviewPromptCoordinator.shared.integration.preparation()
         )
         GravitySDK.instance.setLogListener { logLevel, message in
             print("GravitySDK \(logLevel): \(message)")
