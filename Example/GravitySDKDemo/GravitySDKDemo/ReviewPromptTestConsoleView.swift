@@ -38,6 +38,11 @@ struct ReviewPromptTestConsoleView: View {
                 Task { await model.runScenarios() }
             }
             .buttonStyle(.bordered)
+            .disabled(model.isRunningScenarios)
+
+            if model.isRunningScenarios {
+                ProgressView()
+            }
 
             if !model.scenarioResults.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
@@ -72,6 +77,7 @@ struct ReviewPromptTestConsoleView: View {
                 Task { await model.loadRecommendations() }
             }
             .buttonStyle(.bordered)
+            .disabled(model.isLoadingRecommendations)
 
             if model.isLoadingRecommendations {
                 ProgressView()
@@ -145,8 +151,7 @@ struct ReviewPromptTestConsoleView: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 Button("Сбросить статус отзывов", role: .destructive) {
-                    ReviewStatusStore.shared.reset()
-                    coordinator.logReviewStatusReset()
+                    coordinator.resetReviewStatus()
                 }
                 .buttonStyle(.bordered)
                 Text("Отправленные отзывы сохраняются в UserDefaults и переживают перезапуск — сброс только для повторного тестирования демо.")
@@ -276,12 +281,15 @@ private final class ReviewPromptTestConsoleModel: ObservableObject {
         let campaign: Campaign
     }
 
+    /// Only for rendering (`productViewBuilder` needs *some* instance, but doesn't touch `api`).
+    /// Actual eligibility checks always use a fresh `makeIntegration` pair — see `runScenarios`/
+    /// `loadRecommendations` — so concurrent runs can never share or race on mutable API state.
     let integration: ReviewPromptIntegration
-    private let api = TestConsoleReviewAPI()
     private let selector: String
 
     @Published var scenarioResults: [ScenarioResult] = []
     @Published var recommendedSlots: [SlotEntry] = []
+    @Published var isRunningScenarios = false
     @Published var isLoadingRecommendations = false
     @Published var didLoadRecommendations = false
     @Published var recommendationsError: String?
@@ -290,29 +298,41 @@ private final class ReviewPromptTestConsoleModel: ObservableObject {
     init(selector: String) {
         self.selector = selector
         self.integration = ReviewPromptIntegration(
-            api: api,
+            api: TestConsoleReviewAPI(),
             selector: selector,
             fallbackProductViewBuilder: TestConsoleFallbackProductViewBuilder(),
             onOpenReview: { _ in }
         )
     }
 
-    func runScenarios() async {
-        var results: [ScenarioResult] = []
-        api.ineligibleSkus = ["SKU-2"]
-        api.shouldThrow = false
-
-        // A fresh instance per run: `didSubmitReview` mutates persistent state, and reusing
-        // `integration` here would make repeated presses of "Запустить проверки" non-idempotent.
+    /// A fresh `ReviewPromptIntegration` + `TestConsoleReviewAPI` pair, owned solely by the
+    /// caller. Each scenario and `loadRecommendations()` gets its own — sharing one mutable `api`
+    /// across concurrent runs (e.g. tapping both buttons back to back) let one run's
+    /// `shouldThrow`/`ineligibleSkus` leak into another's in-flight request.
+    private func makeIntegration(
+        ineligibleSkus: Set<String> = [],
+        shouldThrow: Bool = false
+    ) -> (integration: ReviewPromptIntegration, api: TestConsoleReviewAPI) {
+        let api = TestConsoleReviewAPI(ineligibleSkus: ineligibleSkus, shouldThrow: shouldThrow)
         let integration = ReviewPromptIntegration(
             api: api,
             selector: selector,
             fallbackProductViewBuilder: TestConsoleFallbackProductViewBuilder(),
             onOpenReview: { _ in }
         )
+        return (integration, api)
+    }
+
+    func runScenarios() async {
+        guard !isRunningScenarios else { return }
+        isRunningScenarios = true
+        defer { isRunningScenarios = false }
+
+        var results: [ScenarioResult] = []
 
         // 1. Eligible-only subset survives filtering.
         do {
+            let (integration, _) = makeIntegration(ineligibleSkus: ["SKU-2"])
             let (content, campaign) = try fixture(skus: ["SKU-1", "SKU-2", "SKU-3"], selector: selector)
             let filtered = try await integration.recommendedContent(for: content, campaign: campaign)
             let skus = filtered?.products?.slots?.compactMap { $0.item["sku"] as? String } ?? []
@@ -328,6 +348,7 @@ private final class ReviewPromptTestConsoleModel: ObservableObject {
 
         // 2. Already-submitted review is excluded even if eligible.
         do {
+            let (integration, _) = makeIntegration()
             let (content, campaign) = try fixture(skus: ["SKU-1", "SKU-3"], selector: selector)
             integration.didSubmitReview(sku: "SKU-3")
             let filtered = try await integration.recommendedContent(for: content, campaign: campaign)
@@ -344,7 +365,7 @@ private final class ReviewPromptTestConsoleModel: ObservableObject {
 
         // 3. No surviving products skips the in-app entirely (nil).
         do {
-            api.ineligibleSkus = ["SKU-1", "SKU-2"]
+            let (integration, _) = makeIntegration(ineligibleSkus: ["SKU-1", "SKU-2"])
             let (content, campaign) = try fixture(skus: ["SKU-1", "SKU-2"], selector: selector)
             let filtered = try await integration.recommendedContent(for: content, campaign: campaign)
             results.append(ScenarioResult(
@@ -352,15 +373,14 @@ private final class ReviewPromptTestConsoleModel: ObservableObject {
                 passed: filtered == nil,
                 detail: filtered == nil ? "nil, как и ожидалось" : "ожидали nil, получили контент"
             ))
-            api.ineligibleSkus = ["SKU-2"]
         } catch {
             results.append(ScenarioResult(name: "Пропускает показ, если нет доступных товаров", passed: false, detail: "\(error)"))
         }
 
         // 4. A campaign with a different selector passes content through untouched.
         do {
+            let (integration, api) = makeIntegration()
             let (content, campaign) = try fixture(skus: ["SKU-1", "SKU-2"], selector: "sdk_cart_reco")
-            api.requestedSkuBatches.removeAll()
             let result = try await integration.recommendedContent(for: content, campaign: campaign)
             let unchanged = result?.products?.slots?.count == content.products?.slots?.count
             let noApiCall = api.requestedSkuBatches.isEmpty
@@ -375,8 +395,8 @@ private final class ReviewPromptTestConsoleModel: ObservableObject {
 
         // 5. Slots without a recognizable sku skip the in-app without calling the API.
         do {
+            let (integration, api) = makeIntegration()
             let (content, campaign) = try fixture(skus: [], selector: selector)
-            api.requestedSkuBatches.removeAll()
             let result = try await integration.recommendedContent(for: content, campaign: campaign)
             results.append(ScenarioResult(
                 name: "Нет SKU — показ пропускается без вызова API",
@@ -389,8 +409,8 @@ private final class ReviewPromptTestConsoleModel: ObservableObject {
 
         // 6. Duplicate SKUs are de-duplicated before calling the eligibility API.
         do {
+            let (integration, api) = makeIntegration()
             let (content, campaign) = try fixture(skus: ["SKU-1", "SKU-1", "SKU-3"], selector: selector)
-            api.requestedSkuBatches.removeAll()
             _ = try await integration.recommendedContent(for: content, campaign: campaign)
             let requested = Set(api.requestedSkuBatches.last ?? [])
             results.append(ScenarioResult(
@@ -404,7 +424,7 @@ private final class ReviewPromptTestConsoleModel: ObservableObject {
 
         // 7. An API error propagates (InAppPreparation.prepare maps this to a skipped in-app).
         do {
-            api.shouldThrow = true
+            let (integration, _) = makeIntegration(shouldThrow: true)
             let (content, campaign) = try fixture(skus: ["SKU-1"], selector: selector)
             var threw = false
             do { _ = try await integration.recommendedContent(for: content, campaign: campaign) }
@@ -414,7 +434,6 @@ private final class ReviewPromptTestConsoleModel: ObservableObject {
                 passed: threw,
                 detail: threw ? "ошибка выброшена, как и ожидалось" : "ошибка не выброшена"
             ))
-            api.shouldThrow = false
         } catch {
             results.append(ScenarioResult(name: "Ошибка API выбрасывается наверх", passed: false, detail: "\(error)"))
         }
@@ -423,11 +442,12 @@ private final class ReviewPromptTestConsoleModel: ObservableObject {
     }
 
     func loadRecommendations() async {
+        guard !isLoadingRecommendations else { return }
         isLoadingRecommendations = true
         recommendationsError = nil
         didLoadRecommendations = false
-        api.ineligibleSkus = ["SKU-2", "SKU-4"]
-        api.shouldThrow = false
+
+        let (integration, _) = makeIntegration(ineligibleSkus: ["SKU-2", "SKU-4"])
 
         do {
             let (content, campaign) = try fixture(
@@ -478,12 +498,20 @@ private final class ReviewPromptTestConsoleModel: ObservableObject {
     }
 }
 
+/// Configured once at construction and never mutated afterward — each caller (one scenario, or
+/// one `loadRecommendations()` run) owns its own instance via `makeIntegration`, so there's no
+/// shared mutable state for concurrent runs to race on.
 private final class TestConsoleReviewAPI: ReviewEligibilityAPI {
-    var ineligibleSkus: Set<String> = []
-    var shouldThrow = false
-    var requestedSkuBatches: [[String]] = []
+    private let ineligibleSkus: Set<String>
+    private let shouldThrow: Bool
+    private(set) var requestedSkuBatches: [[String]] = []
 
     struct SimulatedFailure: Error {}
+
+    init(ineligibleSkus: Set<String> = [], shouldThrow: Bool = false) {
+        self.ineligibleSkus = ineligibleSkus
+        self.shouldThrow = shouldThrow
+    }
 
     func eligibleSkus(_ skus: [String]) async throws -> Set<String> {
         requestedSkuBatches.append(skus)
