@@ -1,10 +1,12 @@
 import SwiftUI
+import UIKit
 import os
 
 struct GravityButton: View {
     let element: Element
     let onClickCallback: (OnClickModel) -> Void
     var item: Item? = nil
+    var enabled: Bool = true
 
     private var style: Style? {
         element.style
@@ -70,9 +72,11 @@ struct GravityButton: View {
             GravityPressButtonStyle(
                 backgroundColor: style?.backgroundColor,
                 pressColor: style?.pressColor,
+                outlineColor: resolveOutlineColor(style?.outlineColor, enabled: enabled),
                 cornerRadius: style?.cornerRadius
             )
         )
+        .disabled(!enabled)
         .applyIf(style?.margin != nil) {
             $0.padding(
                 .init(
@@ -89,6 +93,7 @@ struct GravityButton: View {
 private struct GravityPressButtonStyle: ButtonStyle {
     let backgroundColor: Color?
     let pressColor: Color?
+    let outlineColor: Color?
     let cornerRadius: Double?
 
     func makeBody(configuration: Configuration) -> some View {
@@ -100,5 +105,19 @@ private struct GravityPressButtonStyle: ButtonStyle {
                     : .clear
             )
             .cornerRadius(cornerRadius ?? 0)
+            .applyIf(outlineColor != nil) {
+                $0.overlay(
+                    RoundedRectangle(cornerRadius: cornerRadius ?? 0)
+                        .strokeBorder(outlineColor!, lineWidth: 1)
+                )
+            }
     }
+}
+
+private let disabledOutlineAlpha: CGFloat = 0.4
+
+func resolveOutlineColor(_ outlineColor: Color?, enabled: Bool) -> Color? {
+    guard let outlineColor else { return nil }
+    if enabled { return outlineColor }
+    return Color(UIColor(outlineColor).withAlphaComponent(disabledOutlineAlpha))
 }
