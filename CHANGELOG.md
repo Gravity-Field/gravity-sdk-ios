@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+* Fix parsing of `#RRGGBB` colors; `#RRGGBBAA` keeps alpha in the last pair. Invalid colors give no color instead of a wrong one
+
 ## 1.0.6
 
 * Add presentation lock to suppress campaign display
