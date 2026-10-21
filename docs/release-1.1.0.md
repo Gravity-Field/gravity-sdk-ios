@@ -6,7 +6,7 @@ This branch combines EGO-247 (review preparation and targeted dismissal) and EGO
 
 - `sh scripts/test-core.sh`: 14 portable regression cases passed.
 - Preparation validation: deadline/cancellation, 200 races, targeted dismissal and callback ordering passed.
-- All 92 Swift files parse with the installed Swift compiler.
+- All 92 Swift files parse with the installed Swift compiler; `swift package dump-package` validates the package manifest.
 - Full iOS build and XCTest execution still require Xcode; this machine has Command Line Tools only.
 
 Before merging, on a Mac with Xcode, build the demo and run the GravitySDK package tests on an available iOS Simulator. Use `xcodebuild -list` to select the SDK test scheme and `xcrun simctl list devices available` to select the simulator. The portable checks do not replace an iOS build.
