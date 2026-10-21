@@ -686,9 +686,8 @@ public class GravitySDK {
             )
 
         case .followUrl:
-            guard let url = onClickModel.url,
-                let type = onClickModel.type
-            else { return }
+            guard let url = onClickModel.url else { return }
+            let type = onClickModel.type ?? .browser
 
             callbackTrackingEvent(
                 FollowUrlEvent(
