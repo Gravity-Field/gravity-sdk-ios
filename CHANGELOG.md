@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 1.1.0
+
+- Prevent duplicate automatic in-app presentations while a campaign is being prepared, displayed, or awaiting visible-impression acknowledgement.
+- Retry transient visible-impression delivery failures; acknowledge visibility only after successful delivery.
+- Combine asynchronous preparation with presentation reservations, rejecting stale screens, users, cancelled tasks, and presentation locks before mounting UI.
+- Load demo credentials from local configuration instead of committing them.
+
 - Add `dismissInApp(contentId:completion:)` for targeted dismissal from the existing ProductViewBuilder; navigate after dismissal and track close once.
 
 - Add optional asynchronous in-app preparation, deadline and per-content skip.

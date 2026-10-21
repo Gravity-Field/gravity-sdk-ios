@@ -42,7 +42,7 @@ https://github.com/Gravity-Field/gravity-sdk-ios.git
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/Gravity-Field/gravity-sdk-ios.git", from: "0.0.9")
+    .package(url: "https://github.com/Gravity-Field/gravity-sdk-ios.git", from: "1.1.0")
 ]
 ```
 
@@ -172,7 +172,7 @@ GravitySDK.initialize(
 )
 ```
 
-[Пример ReviewPromptIntegration](Example/GravitySDKDemo/GravitySDKDemo/ReviewPromptIntegration.swift) включает интерфейс клиентского API eligibility, карточку с кнопкой «Оставить отзыв» и обновление локального статуса через `didSubmitReview(sku:)` после успешной отправки отзыва. Карточка вызывает `dismissInApp`; SDK закрывает sheet и затем вызывает `onOpenReview` для маршрутизации приложения. В demo-приложении пример подключён по умолчанию через [ReviewPromptCoordinator](Example/GravitySDKDemo/GravitySDKDemo/ReviewPromptCoordinator.swift) с настоящим клиентским API (`DemoReviewEligibilityAPI` + `ReviewStatusStore`, см. ниже) — это не стаб, который одобряет все SKU, а реальная батчевая проверка "уже есть отзыв", которая сохраняется между запусками приложения.
+[Пример ReviewPromptIntegration](Example/GravitySDKDemo/GravitySDKDemo/ReviewPromptIntegration.swift) включает интерфейс клиентского API eligibility, карточку с кнопкой «Оставить отзыв» и обновление локального статуса через `didSubmitReview(sku:)` после успешной отправки отзыва. Карточка вызывает `dismissInApp`; SDK закрывает sheet и затем вызывает `onOpenReview` для маршрутизации приложения. В demo-приложении пример подключён через [ReviewPromptCoordinator](Example/GravitySDKDemo/GravitySDKDemo/ReviewPromptCoordinator.swift): `DemoReviewEligibilityAPI` проверяет локальный `ReviewStatusStore`, который сохраняется между запусками. Это демонстрация клиентской фильтрации, а не серверное API отзывов. В приложении клиента замените эту проверку обращением к своему API и обновляйте локальный статус только после успешной отправки отзыва.
 
 Обработчик можно написать напрямую:
 
