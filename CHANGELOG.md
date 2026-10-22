@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+* Add `customProps` and `eventTime` to all trigger events; `CustomEvent` also gets `cuid`, `cuidType` and `cart`
+
 ## 1.0.6
 
 * Add presentation lock to suppress campaign display

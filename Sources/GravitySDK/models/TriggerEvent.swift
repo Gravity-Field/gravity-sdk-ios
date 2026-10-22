@@ -3,21 +3,37 @@ import Foundation
 public class TriggerEvent: Encodable {
     public let type: String
     public let name: String
+    /// Extra properties sent alongside the typed fields. String values only.
+    public let customProps: [String: String]?
+    /// When the event happened; sent in UTC. Omitted, the server uses receipt time.
+    public let eventTime: Date?
     
     enum CodingKeys: String, CodingKey {
-        case type, name
+        case type, name, customProps, eventTime
     }
     
-    internal init(type: String, name: String) {
+    internal init(type: String, name: String, customProps: [String: String]?, eventTime: Date?) {
         self.type = type
         self.name = name
+        self.customProps = customProps
+        self.eventTime = eventTime
     }
     
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(type, forKey: .type)
         try container.encode(name, forKey: .name)
+        try container.encodeIfPresent(customProps, forKey: .customProps)
+        try container.encodeIfPresent(eventTime.map(formatEventTime), forKey: .eventTime)
     }
+}
+
+/// RFC 3339 timestamp in UTC with millisecond precision, e.g. `2026-08-28T11:00:00.123Z`.
+func formatEventTime(_ date: Date) -> String {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    formatter.timeZone = TimeZone(identifier: "UTC")
+    return formatter.string(from: date)
 }
 
 public class AddToCartEvent: TriggerEvent {
@@ -31,13 +47,13 @@ public class AddToCartEvent: TriggerEvent {
         case value, productId, quantity, currency, cart
     }
     
-    public init(value: Double, productId: String, quantity: Int, currency: String? = nil, cart: [CartItem]? = nil) {
+    public init(value: Double, productId: String, quantity: Int, currency: String? = nil, cart: [CartItem]? = nil, customProps: [String: String]? = nil, eventTime: Date? = nil) {
         self.value = value
         self.productId = productId
         self.quantity = quantity
         self.currency = currency
         self.cart = cart
-        super.init(type: "add-to-cart-v1", name: "Add to Cart")
+        super.init(type: "add-to-cart-v1", name: "Add to Cart", customProps: customProps, eventTime: eventTime)
     }
     
     public override func encode(to encoder: Encoder) throws {
@@ -61,12 +77,12 @@ public class PurchaseEvent: TriggerEvent {
         case uniqueTransactionId, value, cart, currency
     }
     
-    public init(uniqueTransactionId: String, value: Double, cart: [CartItem], currency: String? = nil) {
+    public init(uniqueTransactionId: String, value: Double, cart: [CartItem], currency: String? = nil, customProps: [String: String]? = nil, eventTime: Date? = nil) {
         self.uniqueTransactionId = uniqueTransactionId
         self.value = value
         self.cart = cart
         self.currency = currency
-        super.init(type: "purchase-v1", name: "Purchase")
+        super.init(type: "purchase-v1", name: "Purchase", customProps: customProps, eventTime: eventTime)
     }
     
     public override func encode(to encoder: Encoder) throws {
@@ -90,13 +106,13 @@ public class RemoveFromCartEvent: TriggerEvent {
         case value, productId, quantity, currency, cart
     }
     
-    public init(value: Double, productId: String, quantity: Int, currency: String? = nil, cart: [CartItem]? = nil) {
+    public init(value: Double, productId: String, quantity: Int, currency: String? = nil, cart: [CartItem]? = nil, customProps: [String: String]? = nil, eventTime: Date? = nil) {
         self.value = value
         self.productId = productId
         self.quantity = quantity
         self.currency = currency
         self.cart = cart
-        super.init(type: "remove-from-cart-v1", name: "Remove from Cart")
+        super.init(type: "remove-from-cart-v1", name: "Remove from Cart", customProps: customProps, eventTime: eventTime)
     }
     
     public override func encode(to encoder: Encoder) throws {
@@ -119,11 +135,11 @@ public class SyncCartEvent: TriggerEvent {
         case value, currency, cart
     }
     
-    public init(value: Double, currency: String? = nil, cart: [CartItem]? = nil) {
+    public init(value: Double, currency: String? = nil, cart: [CartItem]? = nil, customProps: [String: String]? = nil, eventTime: Date? = nil) {
         self.value = value
         self.currency = currency
         self.cart = cart
-        super.init(type: "sync-cart-v1", name: "Sync cart")
+        super.init(type: "sync-cart-v1", name: "Sync cart", customProps: customProps, eventTime: eventTime)
     }
     
     public override func encode(to encoder: Encoder) throws {
@@ -143,10 +159,10 @@ public class AddToWishlistEvent: TriggerEvent {
         case value, productId
     }
     
-    public init(value: Double, productId: String) {
+    public init(value: Double, productId: String, customProps: [String: String]? = nil, eventTime: Date? = nil) {
         self.value = value
         self.productId = productId
-        super.init(type: "add-to-wishlist-v1", name: "Add to Wishlist")
+        super.init(type: "add-to-wishlist-v1", name: "Add to Wishlist", customProps: customProps, eventTime: eventTime)
     }
     
     public override func encode(to encoder: Encoder) throws {
@@ -166,11 +182,11 @@ public class SignUpEvent: TriggerEvent {
         case hashedEmail, cuid, cuidType
     }
     
-    public init(hashedEmail: String? = nil, cuid: String? = nil, cuidType: String? = nil) {
+    public init(hashedEmail: String? = nil, cuid: String? = nil, cuidType: String? = nil, customProps: [String: String]? = nil, eventTime: Date? = nil) {
         self.hashedEmail = hashedEmail
         self.cuid = cuid
         self.cuidType = cuidType
-        super.init(type: "signup-v1", name: "Signup")
+        super.init(type: "signup-v1", name: "Signup", customProps: customProps, eventTime: eventTime)
     }
     
     public override func encode(to encoder: Encoder) throws {
@@ -191,11 +207,11 @@ public class LoginEvent: TriggerEvent {
         case hashedEmail, cuid, cuidType
     }
     
-    public init(hashedEmail: String? = nil, cuid: String? = nil, cuidType: String? = nil) {
+    public init(hashedEmail: String? = nil, cuid: String? = nil, cuidType: String? = nil, customProps: [String: String]? = nil, eventTime: Date? = nil) {
         self.hashedEmail = hashedEmail
         self.cuid = cuid
         self.cuidType = cuidType
-        super.init(type: "login-v1", name: "Login")
+        super.init(type: "login-v1", name: "Login", customProps: customProps, eventTime: eventTime)
     }
     
     public override func encode(to encoder: Encoder) throws {
@@ -208,21 +224,35 @@ public class LoginEvent: TriggerEvent {
 }
 
 public class CustomEvent: TriggerEvent {
-    public let customProps: [String: String]?
+    public let cuid: String?
+    public let cuidType: String?
+    public let cart: [CartItem]?
     
     enum CodingKeys: String, CodingKey {
-        case customProps
+        case cuid, cuidType, cart
     }
     
-    public init(type: String, name: String, customProps: [String: String]? = nil) {
-        self.customProps = customProps
-        super.init(type: type, name: name)
+    public init(
+        type: String,
+        name: String,
+        cuid: String? = nil,
+        cuidType: String? = nil,
+        cart: [CartItem]? = nil,
+        customProps: [String: String]? = nil,
+        eventTime: Date? = nil
+    ) {
+        self.cuid = cuid
+        self.cuidType = cuidType
+        self.cart = cart
+        super.init(type: type, name: name, customProps: customProps, eventTime: eventTime)
     }
     
     public override func encode(to encoder: Encoder) throws {
         try super.encode(to: encoder)
         var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encodeIfPresent(customProps, forKey: .customProps)
+        try container.encodeIfPresent(cuid, forKey: .cuid)
+        try container.encodeIfPresent(cuidType, forKey: .cuidType)
+        try container.encodeIfPresent(cart, forKey: .cart)
     }
 }
 
