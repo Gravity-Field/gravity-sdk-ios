@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+* Send content requests (`getContentBySelector`, `getContentByCampaignId`, `getContentByGroupSelector`) on behalf of the user set via `setUser`
+
 ## 1.0.6
 
 * Add presentation lock to suppress campaign display

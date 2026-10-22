@@ -85,7 +85,21 @@ public class GravitySDK {
         )
     }
 
-    internal var user: User?
+    // Written by setUser on the caller's thread, read by request Tasks
+    private let userLock = NSLock()
+    private var _user: User?
+    internal var user: User? {
+        get {
+            userLock.lock()
+            defer { userLock.unlock() }
+            return _user
+        }
+        set {
+            userLock.lock()
+            defer { userLock.unlock() }
+            _user = newValue
+        }
+    }
     private var options = Options()
     private var contentSettings = ContentSettings()
     internal var logListener: GravityLogListener?
@@ -246,6 +260,7 @@ public class GravitySDK {
                 selector: selector,
                 options: options,
                 contentSettings: contentSettings,
+                customerUser: user,
                 pageContext: pageContext
             )
         else { return nil }
@@ -279,6 +294,7 @@ public class GravitySDK {
                 group: groupSelector,
                 options: options,
                 contentSettings: contentSettings,
+                customerUser: user,
                 pageContext: pageContext
             )
         else { return nil }
@@ -436,6 +452,7 @@ public class GravitySDK {
                 campaignId: campaignId,
                 options: options,
                 contentSettings: contentSettings,
+                customerUser: user,
                 pageContext: pageContext
             )
         else { return nil }
