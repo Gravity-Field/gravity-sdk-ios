@@ -3,6 +3,7 @@
 ## Unreleased
 
 * Add `customProps` and `eventTime` to all trigger events; `CustomEvent` also gets `cuid`, `cuidType` and `cart`
+* Events without `eventTime` are sent with the time `triggerEvent` was called
 
 ## 1.0.6
 

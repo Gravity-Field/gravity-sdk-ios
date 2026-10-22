@@ -112,6 +112,23 @@ GravitySDK.instance.triggerEvent(
 )
 ```
 
+У всех событий есть два необязательных поля:
+
+- `customProps` — дополнительные свойства `[String: String]` (только строковые значения: числа передавайте строкой, вложенные объекты и списки сервер не принимает);
+- `eventTime` — когда событие произошло (`Date`). SDK отправляет его в UTC; если не задано, подставляется время вызова `triggerEvent`.
+
+```swift
+AddToCartEvent(
+    value: 99.99,
+    productId: "sku-123",
+    quantity: 1,
+    customProps: ["list": "search"],
+    eventTime: Date()
+)
+```
+
+У `CustomEvent` дополнительно есть `cuid` / `cuidType` (идентификатор пользователя, как у `LoginEvent`) и `cart` (список `CartItem`).
+
 ## Взаимодействие
 
 ```swift

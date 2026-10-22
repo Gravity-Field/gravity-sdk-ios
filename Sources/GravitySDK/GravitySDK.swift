@@ -213,12 +213,15 @@ public class GravitySDK {
         viewController: UIViewController? = nil
     ) {
         guard checkInitialized() else { return }
+        // The event happened now; events without their own eventTime are sent with it
+        let raisedAt = Date()
 
         Task {
             do {
                 guard
                     let campaignIdsResponse = await repository.event(
                         events: events,
+                        raisedAt: raisedAt,
                         pageContext: pageContext,
                         options: options,
                         customerUser: user

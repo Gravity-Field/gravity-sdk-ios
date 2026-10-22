@@ -46,6 +46,25 @@ struct ContentView: View {
                         )
                     )
                 }
+
+                Button("Trigger event with customProps") {
+                    GravitySDK.instance.triggerEvent(
+                        events: [
+                            AddToCartEvent(
+                                value: 99.99,
+                                productId: "sku-123",
+                                quantity: 1,
+                                customProps: ["list": "search"],
+                                eventTime: Date()
+                            )
+                        ],
+                        pageContext: PageContext(
+                            type: .homepage,
+                            data: [],
+                            location: "homepage"
+                        )
+                    )
+                }
                 
                 Button("Get content by selector") {
                     Task {

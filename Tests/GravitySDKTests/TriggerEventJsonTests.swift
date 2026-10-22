@@ -6,7 +6,7 @@ private let props = ["list": "search", "payment_type": "card"]
 // 2026-09-03 09:00:15.250 UTC
 private let time = Date(timeIntervalSince1970: 1_788_426_015.25)
 
-private func wire(_ event: TriggerEvent) throws -> [String: Any] {
+private func wire<T: Encodable>(_ event: T) throws -> [String: Any] {
     let data = try JSONEncoder().encode(event)
     return try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
 }
@@ -72,4 +72,67 @@ private func typedEvents(customProps: [String: String]? = nil, eventTime: Date? 
 @Test func customEventKeepsLegacyCustomPropsInit() throws {
     let json = try wire(CustomEvent(type: "x", name: "X", customProps: ["a": "b"]))
     #expect(json["customProps"] as? [String: String] == ["a": "b"])
+}
+
+@Test func typedFieldsStillSerializeNextToCustomProps() throws {
+    let json = try wire(AddToCartEvent(value: 99.5, productId: "sku-1", quantity: 2, currency: "RUB", customProps: props))
+    #expect(Set(json.keys) == ["type", "name", "value", "productId", "quantity", "currency", "customProps"])
+    #expect(json["type"] as? String == "add-to-cart-v1")
+    #expect(json["name"] as? String == "Add to Cart")
+    #expect(json["value"] as? Double == 99.5)
+    #expect(json["productId"] as? String == "sku-1")
+    #expect(json["quantity"] as? Int == 2)
+    #expect(json["currency"] as? String == "RUB")
+    #expect(json["customProps"] as? [String: String] == props)
+}
+
+@Test func emptyCustomPropsIsSentAsEmptyObject() throws {
+    let json = try wire(CustomEvent(type: "x", name: "X", customProps: [:]))
+    #expect((json["customProps"] as? [String: String])?.isEmpty == true)
+}
+
+@Test func eventTimeIsSentInUtcWhateverTheTimeZoneItWasBuiltIn() throws {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = try #require(TimeZone(identifier: "Asia/Novosibirsk"))
+    // 16:00:15.250 in Novosibirsk (UTC+7) is 09:00:15.250 UTC
+    let local = try #require(
+        calendar.date(from: DateComponents(year: 2026, month: 9, day: 3, hour: 16, minute: 0, second: 15, nanosecond: 250_000_000))
+    )
+    let json = try wire(CustomEvent(type: "x", name: "X", eventTime: local))
+    #expect(json["eventTime"] as? String == "2026-09-03T09:00:15.250Z")
+}
+
+@Test func eventsWithoutEventTimeGetTheRaisedAtTime() throws {
+    let raisedAt = time.addingTimeInterval(60)
+    let explicit = try wire(EventPayload(event: CustomEvent(type: "a", name: "A", eventTime: time), raisedAt: raisedAt))
+    let implicit = try wire(EventPayload(event: CustomEvent(type: "b", name: "B"), raisedAt: raisedAt))
+    #expect(explicit["eventTime"] as? String == "2026-09-03T09:00:15.250Z")
+    #expect(implicit["eventTime"] as? String == "2026-09-03T09:01:15.250Z")
+    #expect(implicit["type"] as? String == "b")
+}
+
+@Test func payloadKeepsTypedFieldsWhenAddingEventTime() throws {
+    let json = try wire(EventPayload(event: AddToCartEvent(value: 99.5, productId: "sku-1", quantity: 2), raisedAt: time))
+    #expect(Set(json.keys) == ["type", "name", "value", "productId", "quantity", "eventTime"])
+    #expect(json["type"] as? String == "add-to-cart-v1")
+    #expect(json["productId"] as? String == "sku-1")
+    #expect(json["eventTime"] as? String == "2026-09-03T09:00:15.250Z")
+}
+
+/// Unset optional fields are omitted, not sent as null.
+@Test func unsetTypedFieldsAreOmitted() throws {
+    let events: [TriggerEvent] = [
+        AddToCartEvent(value: 1, productId: "p", quantity: 1),
+        RemoveFromCartEvent(value: 1, productId: "p", quantity: 1),
+        SyncCartEvent(value: 1),
+        PurchaseEvent(uniqueTransactionId: "t", value: 1, cart: []),
+        AddToWishlistEvent(value: 1, productId: "p"),
+        SignUpEvent(),
+        LoginEvent(),
+        CustomEvent(type: "x", name: "X"),
+    ]
+    for event in events {
+        let json = try wire(event)
+        #expect(!json.values.contains { $0 is NSNull }, "\(event.type)")
+    }
 }

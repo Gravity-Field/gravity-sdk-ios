@@ -5,7 +5,7 @@ public class TriggerEvent: Encodable {
     public let name: String
     /// Extra properties sent alongside the typed fields. String values only.
     public let customProps: [String: String]?
-    /// When the event happened; sent in UTC. Omitted, the server uses receipt time.
+    /// When the event happened; sent in UTC. Omitted, the time `triggerEvent` was called is sent.
     public let eventTime: Date?
     
     enum CodingKeys: String, CodingKey {
@@ -25,6 +25,21 @@ public class TriggerEvent: Encodable {
         try container.encode(name, forKey: .name)
         try container.encodeIfPresent(customProps, forKey: .customProps)
         try container.encodeIfPresent(eventTime.map(formatEventTime), forKey: .eventTime)
+    }
+}
+
+/// An event as it goes into the /event body: events without their own eventTime
+/// get `raisedAt`, the moment the app raised them; an explicit eventTime is kept.
+struct EventPayload: Encodable {
+    let event: TriggerEvent
+    let raisedAt: Date
+
+    func encode(to encoder: Encoder) throws {
+        try event.encode(to: encoder)
+        if event.eventTime == nil {
+            var container = encoder.container(keyedBy: TriggerEvent.CodingKeys.self)
+            try container.encode(formatEventTime(raisedAt), forKey: .eventTime)
+        }
     }
 }
 
