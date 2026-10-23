@@ -4,6 +4,8 @@
 
 ## 1.1.0
 
+- Send all content requests on behalf of the user set via `setUser`, preserving the automatic request user snapshot.
+
 - Default missing follow_url type to browser.
 - Render button borders from outlineColor and preserve disabled/pressed styling.
 - Fix parsing of `#RRGGBB` colors; `#RRGGBBAA` keeps alpha last. Invalid colors resolve to no color.
