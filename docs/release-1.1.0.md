@@ -2,12 +2,18 @@
 
 This branch combines EGO-247 (review preparation and targeted dismissal) and EGO-248 (automatic presentation deduplication and confirmed visible-impression delivery). It extends the existing initialization API without requiring existing clients to enable preparation. Backend endpoints and payload schemas are unchanged.
 
+## Integrated changes (2026-10-23)
+
+This aggregate MR includes the exact heads of !1 (review preparation and dismissal), !2 (presentation reservations and visible impressions), !4 (follow_url browser default), !5 (button outline and state styling), !6 (RGB/RGBA parsing), and !9 (the EGO-246 user identity prerequisite and wire tests). Merge this MR once; the included source MRs do not need separate merges. MR !8 (custom event properties) and !10 (headless raw JSON/variables) remain separate.
+
+Conflict resolution retains the EGO-248 synchronized user snapshot instead of introducing a second identity lock or reading the latest user for an earlier automatic request. Skipped/failed preparation releases the reservation; successful preparation still rechecks screen, user revision and presentation lock. User wire tests reset through SDK initialization rather than assigning the now read-only internal user property. Backend request and event contracts are unchanged.
+
 ## Validation
 
 - `sh scripts/test-core.sh`: 14 portable regression cases passed.
 - Preparation validation: deadline/cancellation, 200 races, targeted dismissal and callback ordering passed.
-- All 92 Swift files parse with the installed Swift compiler; `swift package dump-package` validates the package manifest.
-- Full iOS build and XCTest execution still require Xcode; this machine has Command Line Tools only.
+- All 99 Swift files parse with the installed Swift compiler; `swift package dump-package` validates the package manifest.
+- Full iOS build and native test execution still require Xcode; this machine has Command Line Tools only. New wire, follow_url, color and button tests are included but have not run on iOS. Keep the MR in Draft until native validation passes.
 
 Before merging, on a Mac with Xcode, build the demo and run the GravitySDK package tests on an available iOS Simulator. Use `xcodebuild -list` to select the SDK test scheme and `xcrun simctl list devices available` to select the simulator. The portable checks do not replace an iOS build.
 
@@ -15,7 +21,7 @@ Before merging, on a Mac with Xcode, build the demo and run the GravitySDK packa
 
 1. Review and merge this aggregate release MR into `main`. It includes both feature MR heads; there is no need to merge the original feature branches separately afterward. The current agent account is Developer and cannot merge the protected `main` branch.
 2. After validation succeeds, create an annotated `1.1.0` tag on the merged `main` commit. Never reuse or move a published version tag.
-3. Verify that the public repository `https://github.com/Gravity-Field/gravity-sdk-ios.git` contains the merged code and the `1.1.0` tag. GitLab and GitHub currently share their main commit, but mirror configuration and its publication trigger are not visible to the current account.
+3. Verify that the public repository `https://github.com/Gravity-Field/gravity-sdk-ios.git` contains the merged code and the `1.1.0` tag. Confirm the exact merged revision and tag in both remotes; synchronization configuration and its publication trigger are not visible to the current account.
 4. Verify the client installation using the published version, then distribute release notes. Client app teams must update the dependency, rebuild, and ship an app release.
 
 To tag the reviewed merge commit from a checkout with `origin` pointing to GitLab:

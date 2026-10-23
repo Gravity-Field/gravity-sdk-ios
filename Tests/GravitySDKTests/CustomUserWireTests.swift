@@ -20,13 +20,10 @@ struct CustomUserWireTests {
         let server = try RecordingServer()
         try await server.start()
         defer { server.stop() }
-        if !GravitySDK.isInitialized {
-            GravitySDK.initialize(apiKey: "custom-user-key", section: "custom-user-section")
-        }
+        GravitySDK.initialize(apiKey: "custom-user-key", section: "custom-user-section")
         GravitySDK.instance.setOptions(options: nil, contentSettings: nil, proxyUrl: server.url)
         defer {
-            GravitySDK.instance.setOptions(options: nil, contentSettings: nil, proxyUrl: nil)
-            GravitySDK.instance.user = nil
+            GravitySDK.initialize(apiKey: "custom-user-key", section: "custom-user-section")
         }
         try await body(server)
     }
@@ -107,7 +104,8 @@ struct CustomUserWireTests {
 
             // Back to anonymous: the earlier session is still the one in use
             server.reset()
-            GravitySDK.instance.user = nil
+            GravitySDK.initialize(apiKey: "custom-user-key", section: "custom-user-section")
+            GravitySDK.instance.setOptions(options: nil, contentSettings: nil, proxyUrl: server.url)
             _ = await GravitySDK.instance.getContentBySelector(selector: "anon-3", pageContext: pageContext)
             let back = try #require(chooseRequests(server).last)
             #expect(user(back)["uid"] == "anon-uid")
