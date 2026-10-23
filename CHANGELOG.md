@@ -4,6 +4,10 @@
 
 ## 1.1.0
 
+- Default missing follow_url type to browser.
+- Render button borders from outlineColor and preserve disabled/pressed styling.
+- Fix parsing of `#RRGGBB` colors; `#RRGGBBAA` keeps alpha last. Invalid colors resolve to no color.
+
 - Prevent duplicate automatic in-app presentations while a campaign is being prepared, displayed, or awaiting visible-impression acknowledgement.
 - Retry transient visible-impression delivery failures; acknowledge visibility only after successful delivery.
 - Combine asynchronous preparation with presentation reservations, rejecting stale screens, users, cancelled tasks, and presentation locks before mounting UI.
