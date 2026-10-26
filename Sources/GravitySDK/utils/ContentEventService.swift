@@ -65,30 +65,35 @@ internal class ContentEventService {
         }
     }
 
-    /// Modal visibility is WRIMP regardless of custom actions, persisted before callbacks/send.
+    /// One attempt per opening. Host/custom visibility notifications survive missing URLs
+    /// and persistence failure; a network WRIMP still requires successful persistence first.
     func sendModalVisibleImpression(
         _ content: CampaignContent, _ campaign: Campaign, sdk: GravitySDK,
         openingId: UUID, scope: String, user: String
     ) -> Bool {
+        defer {
+            sdk.callbackTrackingEvent(ContentVisibleImpressionEvent(content: content, campaign: campaign))
+            if let custom = content.variables?.onVisibleImpression, custom.action != .visibleImpression {
+                trackEngagement(contentAction: custom, content: content)
+            }
+        }
         guard let event = content.events?.first(where: { $0.type == .visibleImpression }),
               !event.urls.isEmpty, let store = sdk.visibleImpressionDelivery.store else {
-            GravityLogger.e("ContentEvent", "Modal visible impression has no tracking URL")
+            GravityLogger.e("ContentEvent", "Modal visible impression has no tracking URL", sendToBack: false)
             return false
         }
+        var seen: Set<String> = []
+        let urls = event.urls.filter { seen.insert($0).inserted }
         do {
             try store.insert(.init(id: openingId, scope: scope,
                 campaignId: campaign.payload.first?.campaignId ?? content.contentId,
-                contentId: content.contentId, urls: Array(Set(event.urls)), user: user))
+                contentId: content.contentId, urls: urls, user: user))
         } catch {
-            GravityLogger.e("ContentEvent", "Unable to persist modal visible impression")
+            GravityLogger.e("ContentEvent", "Unable to persist modal visible impression", sendToBack: false)
             return false
         }
         sdk.presentationGate.visible(contentId: content.contentId, durable: true)
         Task { await sdk.visibleImpressionDelivery.resumePending() }
-        sdk.callbackTrackingEvent(ContentVisibleImpressionEvent(content: content, campaign: campaign))
-        if let custom = content.variables?.onVisibleImpression, custom.action != .visibleImpression {
-            trackEngagement(contentAction: custom, content: content)
-        }
         return true
     }
 

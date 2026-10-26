@@ -5,6 +5,7 @@ internal final class ModalImpressionSession {
     private let lock = NSRecursiveLock()
     private var appeared = false
     private var fired = false
+    private var persisted = false
     private let confirm: () -> Bool
     private let release: () -> Void
 
@@ -34,13 +35,13 @@ internal final class ModalImpressionSession {
     func disappeared() {
         lock.lock(); defer { lock.unlock() }
         appeared = false
-        if !fired { release() }
+        if !persisted { release() }
     }
 
     private func fireIfNeeded() {
         guard !fired else { return }
         // Set before invoking callbacks, which may synchronously dismiss the UI.
         fired = true
-        if !confirm() { fired = false }
+        persisted = confirm()
     }
 }

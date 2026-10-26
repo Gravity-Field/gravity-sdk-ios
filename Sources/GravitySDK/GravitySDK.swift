@@ -19,18 +19,19 @@ public class GravitySDK {
     private let presentationRevision = PresentationRevision()
     private let inAppPresentations = InAppPresentationRegistry()
 
-    private init(
+    internal init(
         apiKey: String,
         section: String,
         gravityEventCallback: GravityEventCallback?,
         productViewBuilder: ProductViewBuilder?,
         productFilter: ProductFilter?,
         uiSettings: UISettings?,
-        inAppPreparation: InAppPreparation? = nil
+        inAppPreparation: InAppPreparation? = nil,
+        visibleImpressionStore: VisibleImpressionStore? = nil
     ) {
         self.apiKey = apiKey
         self.section = section
-        let store = Self.impressionStore(apiKey: apiKey, section: section)
+        let store = visibleImpressionStore ?? Self.impressionStore(apiKey: apiKey, section: section)
         let gate = InAppPresentationGate()
         self.presentationGate = gate
         self.visibleImpressionDelivery = VisibleImpressionDelivery(
@@ -38,6 +39,9 @@ public class GravitySDK {
             retryable: EngagementTransport.isRetryable,
             store: store,
             startsSuspended: true,
+            discarded: { [weak gate] entry in
+                gate?.discardDelivery(scope: entry.scope, campaignId: entry.campaignId, contentId: entry.contentId)
+            },
             acknowledged: { [weak gate] entry in
                 gate?.acknowledgeDelivery(scope: entry.scope, campaignId: entry.campaignId, contentId: entry.contentId)
             }
@@ -667,19 +671,14 @@ public class GravitySDK {
     }
 
     @discardableResult
-    @MainActor private func showBackendContent(
+    @MainActor internal func showBackendContent(
         _ viewController: UIViewController,
         _ content: CampaignContent,
         _ campaign: Campaign,
         impressionSession: ModalImpressionSession? = nil,
         item: Item? = nil
     ) -> Bool {
-        let (scope, user) = presentationGate.scoped { (impressionScope, impressionUser) }
-        let openingId = UUID()
-        let opening = impressionSession ?? ModalImpressionSession(confirm: { [self] in
-            contentEventService.sendModalVisibleImpression(content, campaign, sdk: self,
-                openingId: openingId, scope: scope, user: user)
-        }, release: { [weak self] in self?.presentationGate.closed(contentId: content.contentId) })
+        let opening = impressionSession ?? makeModalImpressionSession(content, campaign)
         switch content.deliveryMethod {
         case .fullScreen: showFullScreen(content, campaign, viewController, impressionSession: opening, item: item)
         case .modal: showModal(content, campaign, viewController, impressionSession: opening, item: item)
@@ -690,6 +689,17 @@ public class GravitySDK {
         case .inline, .unknown: return false
         }
         return true
+    }
+
+    @MainActor internal func makeModalImpressionSession(
+        _ content: CampaignContent, _ campaign: Campaign
+    ) -> ModalImpressionSession {
+        let (scope, user) = presentationGate.scoped { (impressionScope, impressionUser) }
+        let openingId = UUID()
+        return ModalImpressionSession(confirm: { [self] in
+            contentEventService.sendModalVisibleImpression(content, campaign, sdk: self,
+                openingId: openingId, scope: scope, user: user)
+        }, release: { [weak self] in self?.presentationGate.closed(contentId: content.contentId) })
     }
 
     @MainActor private func showFullScreen(

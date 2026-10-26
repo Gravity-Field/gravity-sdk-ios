@@ -14,7 +14,7 @@ struct ModalContentVisibilityTracker<Content: View>: View {
     }
 }
 
-private struct ModalFrameProbe: UIViewRepresentable {
+internal struct ModalFrameProbe: UIViewRepresentable {
     let session: ModalImpressionSession
 
     func makeUIView(context: Context) -> FrameView { FrameView(session: session) }
@@ -29,7 +29,7 @@ private struct ModalFrameProbe: UIViewRepresentable {
 
         private let session: ModalImpressionSession
         private let target = TickTarget()
-        private var displayLink: CADisplayLink?
+        private(set) var displayLink: CADisplayLink?
 
         init(session: ModalImpressionSession) {
             self.session = session
@@ -52,22 +52,30 @@ private struct ModalFrameProbe: UIViewRepresentable {
         func stop() { displayLink?.invalidate(); displayLink = nil }
         deinit { stop() }
 
-        private func sample() {
+        func sample() {
             if session.hasFired { stop(); return }
-            guard UIApplication.shared.applicationState == .active,
-                  let window, !window.isHidden, window.alpha > 0,
-                  window.windowScene?.activationState == .foregroundActive,
-                  let rendered = layer.presentation(), !rendered.bounds.isEmpty else { return }
+            guard let window, Self.contentIsVisible(
+                rendered: layer.presentation(), window: window,
+                applicationIsActive: UIApplication.shared.applicationState == .active,
+                sceneIsActive: window.windowScene?.activationState == .foregroundActive
+            ) else { return }
+            session.confirmFrame(isActive: true)
+            stop()
+        }
+
+        static func contentIsVisible(rendered: CALayer?, window: UIWindow,
+                                     applicationIsActive: Bool, sceneIsActive: Bool) -> Bool {
+            guard applicationIsActive, sceneIsActive, !window.isHidden, window.alpha > 0,
+                  let rendered, !rendered.bounds.isEmpty else { return false }
             var ancestor: CALayer? = rendered
             while let current = ancestor {
-                guard !current.isHidden, current.opacity > 0 else { return }
+                guard !current.isHidden, current.opacity > 0 else { return false }
                 ancestor = current.superlayer
             }
             let windowLayer = window.layer.presentation() ?? window.layer
             let frame = rendered.convert(rendered.bounds, to: windowLayer)
             let intersection = frame.intersection(window.bounds)
-            guard !intersection.isNull, !intersection.isEmpty else { return }
-            session.confirmFrame(isActive: true)
+            return !intersection.isNull && !intersection.isEmpty
         }
     }
 }

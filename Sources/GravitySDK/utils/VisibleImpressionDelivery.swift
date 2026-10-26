@@ -12,6 +12,7 @@ internal actor VisibleImpressionDelivery {
     }
 
     nonisolated let store: VisibleImpressionStore?
+    private let discarded: (VisibleImpressionStore.Entry) -> Void
     private let acknowledged: (VisibleImpressionStore.Entry) -> Void
     private var drainFlight: (id: UUID, task: Task<Void, Never>)?
     private var stopped = false
@@ -27,15 +28,19 @@ internal actor VisibleImpressionDelivery {
     private let sleep: (UInt64) async throws -> Void
     private var flights: [String: Flight] = [:]
     private var delivered: [String: TimeInterval] = [:]
+    // Keep successful durable sends until their local removal succeeds (bounded by the queue TTL).
+    private var durableDelivered: Set<String> = []
 
     init(send: @escaping (String) async throws -> Void,
          retryable: @escaping (Error) -> Bool = { _ in true },
          sleep: @escaping (UInt64) async throws -> Void = { try await Task.sleep(nanoseconds: $0) },
          store: VisibleImpressionStore? = nil,
          startsSuspended: Bool = false,
+         discarded: @escaping (VisibleImpressionStore.Entry) -> Void = { _ in },
          acknowledged: @escaping (VisibleImpressionStore.Entry) -> Void = { _ in }) {
         self.suspended = startsSuspended
         self.store = store
+        self.discarded = discarded
         self.acknowledged = acknowledged
         self.send = send
         self.retryable = retryable
@@ -86,10 +91,13 @@ internal actor VisibleImpressionDelivery {
         guard let store, !stopped else { return }
         retryTask?.cancel()
         retryTask = nil
+        try? store.prune()
+        let liveKeys = Set(store.entries.flatMap { entry in entry.urls.map { entry.id.uuidString + $0 } })
+        durableDelivered.formIntersection(liveKeys)
         var attempted: Set<UUID> = []
         while let entry = store.entries.first(where: { !attempted.contains($0.id) }) {
             attempted.insert(entry.id)
-            for url in entry.urls where !(entry.rejectedUrls ?? []).contains(url) {
+            for url in entry.urls {
                 guard !stopped else { return }
                 let key = entry.id.uuidString + url
                 // Durable events are coalesced by opening ID, not a session-wide URL cache.
@@ -98,17 +106,23 @@ internal actor VisibleImpressionDelivery {
                     if store.entries.first(where: { $0.id == entry.id })?.urls.allSatisfy({ $0 == url }) == true {
                         acknowledged(entry)
                     }
-                    do { try store.acknowledge(id: entry.id, url: url) }
+                    do {
+                        try store.acknowledge(id: entry.id, url: url)
+                        durableDelivered.remove(key)
+                    }
                     catch { /* Keep the durable event and protection if the disk write fails. */ }
                 } else if permanentFailures.contains(key) {
                     do {
-                        try store.reject(id: entry.id, url: url)
-                        permanentFailures.remove(key)
-                    } catch { /* Retry the persistence operation, preserving the event. */ }
+                        try store.discard(id: entry.id)
+                    } catch { /* The original timestamp bounds any stale disk copy. */ }
+                    permanentFailures.remove(key)
+                    durableDelivered = durableDelivered.filter { !$0.hasPrefix(entry.id.uuidString) }
+                    discarded(entry)
+                    break
                 }
             }
         }
-        if !stopped, store.entries.contains(where: { entry in entry.urls.contains { !(entry.rejectedUrls ?? []).contains($0) } }) {
+        if !stopped, !store.entries.isEmpty {
             retryTask = Task { [weak self] in
                 do { try await Task.sleep(nanoseconds: 30_000_000_000) }
                 catch { return }
@@ -129,6 +143,7 @@ internal actor VisibleImpressionDelivery {
 
     private func deliver(url: String, cacheKey: String? = nil) async -> Bool {
         let key = cacheKey ?? url
+        if cacheKey != nil, durableDelivered.contains(key) { return true }
         let time = ProcessInfo.processInfo.systemUptime
         delivered = delivered.filter { time - $0.value < 900 }
         if delivered[key] != nil { return true }
@@ -159,6 +174,7 @@ internal actor VisibleImpressionDelivery {
         let success = await task.value
         if flights[key]?.id == id { flights.removeValue(forKey: key) }
         if success {
+            if cacheKey != nil { durableDelivered.insert(key) }
             delivered[key] = ProcessInfo.processInfo.systemUptime
             if delivered.count > 512, let oldest = delivered.min(by: { $0.value < $1.value })?.key {
                 delivered.removeValue(forKey: oldest)

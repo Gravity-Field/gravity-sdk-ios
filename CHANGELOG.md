@@ -4,6 +4,10 @@
 
 - Count modal, fullscreen and bottom-sheet visible impressions on the first confirmed content frame while active, with one WRIMP per opening across fast explicit close and step transitions.
 - Persist modal WRIMP URLs and original user context before sending; retain campaign protection through offline close/restart, retry on network restoration, and release after server acknowledgement.
+- Bound modal WRIMP retention to 7 days and 256 openings/1 MiB per API-key/section; drop permanent HTTP/URL failures and release protection without treating them as acknowledgements.
+- Stop modal visibility detection after one attempt even when WRIMP is absent or persistence fails; preserve the appearance callback/custom action and log locally once.
+- Recover valid queue records from corrupt files, quarantine damaged data, preserve temporarily unreadable files, and exclude the queue from device backups.
+- Emit modal visibility callbacks and custom onVisible actions once for the initial step of an opening; OPEN_STEP no longer emits per-step visibility notifications. Custom onVisible actions now run alongside WRIMP rather than replacing it, retaining their existing best-effort delivery.
 
 ## 1.1.0
 
