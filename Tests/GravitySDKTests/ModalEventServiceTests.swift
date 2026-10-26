@@ -3,6 +3,43 @@ import UIKit
 @testable import GravitySDK
 
 final class ModalEventServiceTests: XCTestCase {
+    @MainActor func testSdkGateUses24HourProtectionInsteadOfDeliveryTtl() throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathComponent("queue.json")
+        defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
+        let shownAt = Date(timeIntervalSince1970: 1000)
+        var time = shownAt
+        let store = VisibleImpressionStore(fileURL: file, now: { time })
+        let sdk = GravitySDK(apiKey: "policy", section: "policy", gravityEventCallback: nil,
+            productViewBuilder: nil, productFilter: nil, uiSettings: nil, visibleImpressionStore: store)
+        try store.insert(.init(id: UUID(), scope: sdk.impressionScope, campaignId: "campaign", contentId: "event",
+            urls: ["original"], user: sdk.impressionUser, createdAt: shownAt))
+        let request = sdk.presentationGate.beginRequest(location: "home", newScreen: true)
+        time = shownAt.addingTimeInterval(86_399)
+        XCTAssertNil(sdk.presentationGate.reserve(campaignId: "campaign", request: request))
+        time = shownAt.addingTimeInterval(86_400)
+        XCTAssertNotNil(sdk.presentationGate.reserve(campaignId: "campaign", request: request))
+        XCTAssertTrue(store.contains(scope: sdk.impressionScope, campaignId: "campaign"))
+    }
+
+    @MainActor func testStoreDiagnosticsUseGravityLoggerAndHostListener() async throws {
+        GravitySDK.initialize(apiKey: "store-log", section: UUID().uuidString)
+        let diagnostic = expectation(description: "store diagnostic reaches host listener")
+        GravitySDK.instance.logListener = { level, message in
+            guard message.contains("[WRIMPStore]") else { return }
+            XCTAssertEqual(level, .error)
+            XCTAssertTrue(message.contains("quarantined"))
+            diagnostic.fulfill()
+        }
+        defer { GravitySDK.instance.logListener = nil }
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathComponent("queue.json")
+        defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("corrupt".utf8).write(to: file)
+        _ = VisibleImpressionStore(fileURL: file, log: GravitySDK.logImpressionStore)
+        await fulfillment(of: [diagnostic], timeout: 1)
+
+    }
+
     @MainActor func testCloseXAndCancelActionsConfirmBeforeDismissal() {
         GravitySDK.initialize(apiKey: "ego272-actions", section: UUID().uuidString)
         let content = CampaignContent(contentId: "initial", deliveryMethod: .modal, contentType: "test", step: 0)

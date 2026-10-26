@@ -61,10 +61,14 @@ func XCTUnwrap<T>(_ value: T?, file: StaticString = #file, line: UInt = #line) t
         try await durable.testQueuedEventWaitsForSdkStartAndThenDeliversOnce()
         try await durable.testFreshOpeningCanReuseUrlAfterAcknowledgement()
         try await durable.testPermanentRejectionDropsEventAndReleasesProtection()
+        try await durable.testProtectionEndsAt24HoursAcrossRestartButDeliveryContinuesUntilSevenDays()
+        try await durable.testInFlightSendCannotExtendProtectionPast24Hours()
+        try durable.testByteCapacityEvictsOldestAndKeepsNewestWrimp()
+        try durable.testNamespaceSweepIsBoundedAndPreservesFreshCurrentAndUnrelatedFiles()
         try await durable.testExpiredQueueReleasesVisibleReservationWithoutAckFence()
         try durable.testCorruptStoreIsQuarantinedAndMixedRecordsRecover()
         try durable.testUnreadableFileIsPreservedAndRetriedBeforeInsert()
         try durable.testQueueCapacityAndBackupExclusion()
-        print("33 Swift core regression cases passed (portable harness)")
+        print("37 Swift core regression cases passed (portable harness)")
     }
 }

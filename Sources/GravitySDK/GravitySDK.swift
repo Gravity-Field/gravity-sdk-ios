@@ -65,7 +65,7 @@ public class GravitySDK {
         }
         gate.deliveryPending = { [weak self] campaignId in
             guard let self else { return false }
-            return store.contains(scope: self.impressionScope, campaignId: campaignId)
+            return store.protects(scope: self.impressionScope, campaignId: campaignId)
         }
         gate.deliveryScope = { [weak self] in self?.impressionScope ?? "" }
         store.observeInsert { [weak delivery = visibleImpressionDelivery] in
@@ -152,9 +152,15 @@ public class GravitySDK {
         if let store = impressionStores[namespace] { return store }
         let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("GravitySDK/visible-impressions", isDirectory: true)
-        let store = VisibleImpressionStore(fileURL: root.appendingPathComponent(namespace + ".json"))
+        let store = VisibleImpressionStore(fileURL: root.appendingPathComponent(namespace + ".json"), log: logImpressionStore)
         impressionStores[namespace] = store
         return store
+    }
+
+    internal static func logImpressionStore(_ message: String) {
+        // Store construction can occur before _instance exists. Defer logging to avoid
+        // recursively initializing the singleton through GravityLogger's host listener.
+        Task { @MainActor in GravityLogger.e("WRIMPStore", message, sendToBack: false) }
     }
 
     internal var impressionUser: String {

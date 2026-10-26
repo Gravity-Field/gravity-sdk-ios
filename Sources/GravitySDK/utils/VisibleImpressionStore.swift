@@ -3,7 +3,8 @@ import Foundation
 /// Bounded durable storage. Reads/writes are synchronous so a frame/explicit close
 /// cannot outrun persistence; network delivery always follows the atomic write.
 internal final class VisibleImpressionStore {
-    static let timeToLive: TimeInterval = 7 * 24 * 60 * 60
+    static let deliveryTimeToLive: TimeInterval = 7 * 24 * 60 * 60
+    static let protectionWindow: TimeInterval = 24 * 60 * 60
     static let maximumEntries = 256
     static let maximumBytes = 1_048_576
 
@@ -21,6 +22,12 @@ internal final class VisibleImpressionStore {
 
     enum StoreError: Error { case unreadable, capacityExceeded }
 
+    // Serialize sweeping with this process's atomic writers, including other namespaces.
+    private static let diskLock = NSRecursiveLock()
+    private static var sweepOffset = 0
+    private static let sweepScanLimit = 256
+    private static let sweepRemovalLimit = 32
+
     private let lock = NSLock()
     let fileURL: URL
     private let now: () -> Date
@@ -32,10 +39,11 @@ internal final class VisibleImpressionStore {
     private var directoryPrepared = false
 
     init(fileURL: URL, now: @escaping () -> Date = Date.init,
-         log: @escaping (String) -> Void = { NSLog("[GravitySDK] [WRIMPStore] %@", $0) }) {
+         log: @escaping (String) -> Void = { _ in }) {
         self.fileURL = fileURL
         self.now = now
         self.log = log
+        sweepExpiredNamespaces()
         load()
     }
 
@@ -47,6 +55,16 @@ internal final class VisibleImpressionStore {
     func contains(scope: String, campaignId: String) -> Bool {
         lock.lock(); defer { lock.unlock() }
         return liveEntries().contains { $0.scope == scope && $0.campaignId == campaignId }
+    }
+
+    /// Protection expires independently of delivery, even during an in-flight send.
+    func protects(scope: String, campaignId: String) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        let time = now()
+        return liveEntries().contains {
+            $0.scope == scope && $0.campaignId == campaignId &&
+            time.timeIntervalSince($0.createdAt ?? .distantPast) < Self.protectionWindow
+        }
     }
 
     func observeInsert(_ callback: @escaping () -> Void) {
@@ -62,7 +80,8 @@ internal final class VisibleImpressionStore {
         guard !pending.contains(where: { $0.id == entry.id }) else { return }
         var entry = entry
         entry.createdAt = min(entry.createdAt ?? now(), now())
-        let next = bounded(liveEntries() + [entry])
+        guard try JSONEncoder().encode([entry]).count <= Self.maximumBytes else { throw StoreError.capacityExceeded }
+        let next = try bounded(liveEntries() + [entry], keeping: entry.id)
         try save(next)
         notify = inserted
     }
@@ -90,7 +109,7 @@ internal final class VisibleImpressionStore {
     func prune() throws {
         lock.lock(); defer { lock.unlock() }
         try requireReadable()
-        let next = bounded(liveEntries())
+        let next = try bounded(liveEntries())
         if next.count != pending.count { pending = next; try save(next) }
     }
 
@@ -98,13 +117,54 @@ internal final class VisibleImpressionStore {
         let time = now()
         return pending.filter {
             !$0.urls.isEmpty && ($0.rejectedUrls ?? []).isEmpty &&
-            time.timeIntervalSince($0.createdAt ?? .distantPast) < Self.timeToLive
+            time.timeIntervalSince($0.createdAt ?? .distantPast) < Self.deliveryTimeToLive
         }
     }
 
-    private func bounded(_ entries: [Entry]) -> [Entry] {
-        Array(entries.sorted { ($0.createdAt ?? .distantPast) < ($1.createdAt ?? .distantPast) }
-            .suffix(Self.maximumEntries))
+    private func bounded(_ entries: [Entry], keeping id: UUID? = nil) throws -> [Entry] {
+        let incoming = entries.first { $0.id == id }
+        var sorted = Array(entries.filter { $0.id != id }
+            .sorted { ($0.createdAt ?? .distantPast) < ($1.createdAt ?? .distantPast) }
+            .suffix(Self.maximumEntries - (incoming == nil ? 0 : 1)))
+        if let incoming { sorted.append(incoming) }
+        sorted.sort { ($0.createdAt ?? .distantPast) < ($1.createdAt ?? .distantPast) }
+        // Array JSON size = encoded records + commas + brackets. Encode each record once,
+        // then evict the oldest existing records, preserving the accepted incoming WRIMP.
+        let encoder = JSONEncoder()
+        let sizes = try sorted.map { try encoder.encode($0).count }
+        var bytes = 2 + sizes.reduce(0, +) + max(0, sizes.count - 1)
+        var dropped: Set<Int> = []
+        for index in sorted.indices where bytes > Self.maximumBytes && sorted[index].id != id {
+            bytes -= sizes[index] + (sorted.count - dropped.count > 1 ? 1 : 0)
+            dropped.insert(index)
+        }
+        return sorted.indices.filter { !dropped.contains($0) }.map { sorted[$0] }
+    }
+
+    private func sweepExpiredNamespaces() {
+        Self.diskLock.lock(); defer { Self.diskLock.unlock() }
+        let directory = fileURL.deletingLastPathComponent()
+        guard let files = try? FileManager.default.contentsOfDirectory(at: directory,
+            includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]).sorted(by: { $0.path < $1.path }),
+            !files.isEmpty else { return }
+        let start = Self.sweepOffset % files.count
+        var removed = 0
+        for step in 0..<min(files.count, Self.sweepScanLimit) {
+            let index = (start + step) % files.count
+            Self.sweepOffset = (index + 1) % files.count
+            let candidate = files[index]
+            guard candidate.standardizedFileURL != fileURL.standardizedFileURL,
+                  ["json", "corrupt"].contains(candidate.pathExtension),
+                  let values = try? candidate.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .contentModificationDateKey]),
+                  values.isRegularFile == true, values.isSymbolicLink != true,
+                  let modified = values.contentModificationDate,
+                  now().timeIntervalSince(modified) > Self.deliveryTimeToLive else { continue }
+            do {
+                try FileManager.default.removeItem(at: candidate)
+                removed += 1
+            } catch { log("Unable to remove expired WRIMP namespace file") }
+            if removed == Self.sweepRemovalLimit { break }
+        }
     }
 
     private func requireReadable() throws {
@@ -113,6 +173,7 @@ internal final class VisibleImpressionStore {
     }
 
     private func load() {
+        Self.diskLock.lock(); defer { Self.diskLock.unlock() }
         let data: Data
         do { data = try Data(contentsOf: fileURL) }
         catch {
@@ -158,8 +219,8 @@ internal final class VisibleImpressionStore {
                 return
             }
         }
-        let next = bounded(liveEntries())
         do {
+            let next = try bounded(liveEntries())
             try prepareDirectory()
             if corrupt || migrated || next.count != decoded.count { try save(next) }
             else { try excludeFromBackup(fileURL) }
@@ -182,6 +243,7 @@ internal final class VisibleImpressionStore {
     }
 
     private func save(_ entries: [Entry]) throws {
+        Self.diskLock.lock(); defer { Self.diskLock.unlock() }
         let bytes = try JSONEncoder().encode(entries)
         guard bytes.count <= Self.maximumBytes else { throw StoreError.capacityExceeded }
         try prepareDirectory()

@@ -45,17 +45,23 @@ original user/event on the existing GET endpoint, which has no current-user requ
 Old-user events are therefore **sent as originally issued**, rather than dropped or attributed
 to the next user. The saved user snapshot also preserves the original session context.
 Pending protection is isolated by API key, section and user identity; changing session does
-not let an undelivered event for the same user bypass it. Returning to that user restores
-its pending protection. Explicit users and anonymous SDK UID have separate scopes.
+not let an undelivered event for the same user bypass the remaining 24-hour window.
+Returning to that user restores its remaining protection without resetting the timestamp. Explicit users and anonymous SDK UID have separate scopes.
 
 The gate consults this same durable store before reservation **and** before presentation,
-including after restart. An appeared presentation does not lose protection on close, screen
-changes, or the old 60-second acknowledgement deadline, while its bounded queue entry exists. Successful URLs are durably removed
-one by one. Only after all URLs return HTTP 2xx is the opening acknowledged; requests begun
+including after restart. An appeared presentation does not lose protection on close or screen
+changes. Local
+protection lasts at most **24 hours from the persisted show timestamp**, or until delivery
+HTTP 2xx / permanent drop / capacity eviction, whichever occurs first. The same timestamp is
+used after restart. Active network attempts never extend the 24-hour window.
+Successful URLs are durably removed one by one. Only after all URLs return HTTP 2xx is the opening acknowledged; requests begun
 before that ACK cannot reopen it, including when the queue was loaded without an in-memory
-reservation. Fresh requests then use the server's frequency policy. There is no session-long
-or permanent ban after successful delivery, and a fresh allowed opening can reuse a URL.
-“No limit” / “every page view” campaigns may open again after acknowledgement.
+reservation. Fresh requests after acknowledgement or protection expiry use the server's
+frequency policy.
+Protection expiry releases both durable and in-memory reservations **without an ACK fence**.
+“No limit” / “every page view” campaigns use this same 24-hour protection policy while delivery
+is pending, with no special case; a fresh allowed opening can reuse a URL. A later opening
+creates its own event/timestamp while older events remain deliverable.
 
 Transient network failures and HTTP 408/429/5xx get three immediate attempts (250 ms and
 1 s pauses), then another batch after 30 seconds. A network-restored `NWPathMonitor` signal
@@ -67,19 +73,23 @@ sender for that store. Store reload retains failed URLs and successful partial p
 Malformed URLs and non-retryable HTTP failures (other 4xx) **drop the entire queued WRIMP**
 and release its in-memory/durable protection without an ACK sequence fence. Legacy rejected
 entries from the first outbox version are dropped on load as well. Every entry has a **7-day
-TTL from creation**, preserved across restarts; expired events are never sent and no longer
-block presentation. Existing files without a timestamp receive a persisted timestamp on
-migration. The queue holds at most **256 openings per API-key/section namespace**; insertion
-replaces expired entries first, then evicts the oldest live openings if necessary. Queue
-serialization is capped at **1 MiB**; an oversized new entry is rejected without overwriting
-existing events. TTL, terminal drop and eviction deliberately trade delivery for restoring
-server-controlled presentation policy; none is reported as a successful server ACK.
+delivery TTL from creation**, preserved across restarts. Delivery retention is independent
+of the 24-hour protection window: at 24 hours the event stays queued and continues retries
+with its original URL/user, including after network restoration or restart. At 7 days it is
+removed and is never sent again. Existing files without a timestamp receive a persisted
+timestamp on migration. The queue holds at most **256 openings per API-key/section namespace** and **1 MiB** of encoded
+JSON. Insertion removes expired entries first, then evicts the oldest live openings until
+both count and byte budgets fit, retaining the new WRIMP. Only an opening that exceeds
+1 MiB by itself is rejected without overwriting existing events. Delivery TTL, terminal
+drop and eviction deliberately trade delivery for restoring server-controlled presentation
+policy; none is reported as a successful server ACK.
 
 Each opening attempts WRIMP persistence only once. Missing WRIMP URLs or disk failure stop
 the display-link probe, emit one local-only error (no error-report POST), and still emit the
 host's `ContentVisibleImpressionEvent` and custom action once. These failures retain the
-ordinary 60-second presentation fallback; passive/explicit close can release the unpersisted
-reservation. No per-frame or close-triggered disk retries occur for that opening. A callback
+ordinary 60-second presentation fallback **while the window remains open**; passive or
+explicit close immediately releases the unpersisted reservation. No per-frame or close-triggered
+disk retries occur for that opening. A callback
 reports actual appearance and does not assert successful persistence or HTTP delivery.
 
 Corrupt JSON is logged locally and moved to a `.corrupt` file (one retained quarantine per
@@ -87,7 +97,9 @@ namespace). Valid records from a partially corrupt array survive; unknown fields
 An unreadable file is preserved and retried before mutations/drain, never overwritten as an
 empty queue. A persistent storage-read failure cannot reconstruct unknown pending protection.
 The queue directory and each atomically replaced file are excluded from iCloud/iTunes backup.
-Quarantine inherits its directory's no-backup exclusion.
+Quarantine inherits its directory's no-backup exclusion. SDK store diagnostics use
+`GravityLogger` with `sendToBack: false`, honoring logLevel and the host logListener; logging
+is deferred until after initialization to avoid recursive singleton creation.
 
 The bounded startup read and atomic persist-before-close write remain synchronous. This is
 intentional: asynchronous enqueue would allow UI dismissal or process termination before
@@ -97,8 +109,17 @@ work; network sends, retries and subsequent ACK writes are owned by the backgrou
 Successful durable sends stay cached until local removal succeeds, so a temporary ACK-write
 failure does not cause an in-process resend when the ordinary 15-minute cache expires.
 Drain remains sequential across openings; a slow endpoint can delay later entries by the
-existing transport timeout/retry budget. Inactive API-key/section files are checked/pruned
-when their namespace is initialized; no cross-namespace filesystem sweeper is introduced.
+existing transport timeout/retry budget.
+
+At store initialization a bounded shallow sweep checks neighboring `*.json`/`*.corrupt`
+files and removes orphaned snapshots whose mtime is older than the 7-day delivery TTL. It
+checks metadata for at most 256 candidates and deletes at most 32 files per pass, rotating
+the scan position for later initializations. The current namespace, fresh files, directories
+and symbolic links are retained. Sweeping is serialized with SDK file readers/writers so a
+concurrent atomic write cannot be removed using stale mtime metadata. Inactive files are
+cleaned on later store constructions, including the next process start or a new namespace;
+reinitializing an already cached store does not trigger another pass. There is no autonomous
+filesystem timer.
 
 Exactly-once network analytics cannot be guaranteed across a crash between server acceptance
 and the local write. Retries preserve the original URL/event ID for backend deduplication.
@@ -125,9 +146,10 @@ Before release, run the host app against a non-production section:
 2. Delay `/engagement` and navigate rapidly across screens. Parallel and stale requests
    must not re-present the campaign while its queue entry exists.
 3. Go offline after appearance, close, kill/relaunch, then restore connectivity. Confirm
-   the original URL is sent and the campaign stays protected until HTTP 2xx, terminal drop,
-   capacity eviction or the 7-day TTL. Exercise HTTP 400/invalid URL and TTL expiration to
-   confirm release without an acknowledgement fence.
+   the original URL is sent. Confirm protection before 24 hours, release at 24 hours across
+   restart without dropping the queued event, retries until the 7-day delivery TTL, and
+   immediate release on HTTP 2xx/permanent drop. Exercise active-send, count/byte eviction,
+   invalid URL and delivery TTL boundaries; only HTTP 2xx creates an ACK fence.
 4. Change user A → B → A and section; confirm delivery retains A's original URL/context
    and protection does not leak into B or another section.
 5. Cancel before appearance, background/remove the host and transition through steps.
