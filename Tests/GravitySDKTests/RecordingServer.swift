@@ -17,6 +17,7 @@ final class RecordingServer: @unchecked Sendable {
 
     // Accessed only on `queue`
     private var campaigns: [[String: Any]] = []
+    private var content: [[String: Any]] = []
     private var responseUser: [String: Any] = ["uid": "server-uid", "ses": "server-ses"]
 
     private(set) var url = ""
@@ -59,10 +60,11 @@ final class RecordingServer: @unchecked Sendable {
         }
     }
 
-    func reset(campaigns: [[String: Any]] = [], responseUser: [String: Any] = ["uid": "server-uid", "ses": "server-ses"]) {
+    func reset(campaigns: [[String: Any]] = [], content: [[String: Any]] = [], responseUser: [String: Any] = ["uid": "server-uid", "ses": "server-ses"]) {
         queue.sync {
             requests.removeAll()
             self.campaigns = campaigns
+            self.content = content
             self.responseUser = responseUser
         }
     }
@@ -132,7 +134,7 @@ final class RecordingServer: @unchecked Sendable {
         if path.hasSuffix("/visit") || path.hasSuffix("/event") {
             json["campaigns"] = campaigns
         } else {
-            json["data"] = []
+            json["data"] = content
         }
         let body = (try? JSONSerialization.data(withJSONObject: json)) ?? Data()
         var response = Data(

@@ -57,6 +57,7 @@ func XCTUnwrap<T>(_ value: T?, file: StaticString = #file, line: UInt = #line) t
         modal.testExplicitCloseAfterInactiveFrameKeepsConfirmedImpression()
         modal.testConcurrentDetectorAndCloseUseOneAtomicFlag()
         let durable = DurableVisibleImpressionTests()
+        try await durable.testInitialRestoreWaitHasDeadlineAndCanBeCancelledWithoutInventingProtection()
         try await durable.testAsyncRestoreAndEnqueueProtectBeforeDiskAndSendOnlyAfterPersistence()
         try await durable.testExponentialRetryCapsAndResetsOnNetworkRestoreAndInsert()
         try durable.testLegacyUserSnapshotIsRemovedOnLoadAndRewrite()
@@ -70,9 +71,9 @@ func XCTUnwrap<T>(_ value: T?, file: StaticString = #file, line: UInt = #line) t
         try durable.testByteCapacityEvictsOldestAndKeepsNewestWrimp()
         try durable.testNamespaceSweepIsBoundedAndPreservesFreshCurrentAndUnrelatedFiles()
         try await durable.testExpiredQueueReleasesVisibleReservationWithoutAckFence()
-        try durable.testCorruptStoreIsQuarantinedAndMixedRecordsRecover()
+        try durable.testCorruptStoreRecoversWithoutCreatingQuarantine()
         try durable.testUnreadableFileIsPreservedAndRetriedBeforeInsert()
         try durable.testQueueCapacityAndBackupExclusion()
-        print("41 Swift core regression cases passed (portable harness)")
+        print("42 Swift core regression cases passed (portable harness)")
     }
 }

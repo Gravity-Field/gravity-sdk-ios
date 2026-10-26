@@ -426,6 +426,13 @@ public class GravitySDK {
         requestUser: User?,
         revision: UInt64
     ) async throws {
+        guard presentationGate.isCurrent(request), !response.campaigns.isEmpty else { return }
+        if let store = visibleImpressionDelivery.store, !(await store.waitUntilLoaded()) {
+            try Task.checkCancellation()
+            GravityLogger.e(Self.TAG, "WRIMP restore timed out; automatic presentation request ended without a protection decision", sendToBack: false)
+            return
+        }
+        try Task.checkCancellation()
         guard presentationGate.isCurrent(request) else { return }
         let targetViewController: UIViewController?
         if let viewController {

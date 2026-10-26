@@ -102,21 +102,26 @@ It expires without a server ACK; no 24-hour protection is applied to a failed wr
 URL. No per-frame or close-triggered disk retries occur for that opening. A callback
 reports actual appearance and does not assert successful persistence or HTTP delivery.
 
-Corrupt JSON is logged locally; a `.corrupt` diagnostic file contains only sanitized,
-decodable minimal records, never a copy of the raw potentially sensitive input. Valid records
-from a partially corrupt array survive; unknown fields are ignored. A namespace's previous
-quarantine is removed on its next load, including legacy quarantines containing user snapshots.
+Corrupt JSON is logged locally and the main file is atomically rewritten with only valid
+minimal records. No redundant `.corrupt` copy is created, and raw potentially sensitive input
+is never copied. Valid records from a partially corrupt array survive; unknown fields are
+ignored. Any legacy quarantine for this namespace is removed on its next load.
 An unreadable file is preserved and retried before mutations/drain, never overwritten as an
 empty queue. A persistent storage-read failure cannot reconstruct unknown pending protection.
 The queue directory and each atomically replaced file are excluded from iCloud/iTunes backup.
 iOS writes explicitly use complete-until-first-user-authentication file protection.
-Quarantine inherits its directory's no-backup exclusion. SDK store diagnostics use
+SDK store diagnostics use
 `GravityLogger` with `sendToBack: false`, honoring logLevel and the host logListener; logging
 is deferred until after initialization to avoid recursive singleton creation.
 
-Startup loading, migration and first-frame persistence run on a serial background store queue.
-Until restoration finishes, the gate temporarily refuses automatic reservations in that
-namespace, so it cannot race the restored protection set. On a confirmed frame the store
+Startup loading, migration and first-frame persistence run on a serial background store queue
+with user-initiated QoS. Before deciding whether to reserve a campaign, automatic presentation
+asynchronously waits for initial restoration (up to 5 seconds, cancellable, no main-thread
+disk wait), then rechecks the request's user/screen generation. The gate only treats actual
+pending entries as protected: it does not skip every campaign while loading. If restoration
+times out, this presentation request ends with a local diagnostic, without creating a
+reservation or protection entry; a subsequent request can proceed after restoration.
+On a confirmed frame the store
 sets staged in-memory protection synchronously; dismissal and navigation can then proceed.
 The worker atomically persists the entry, promotes its gate protection, and only then wakes
 delivery and emits the host appearance callback (which may arrive after UI dismissal). A failed write removes staged protection and
@@ -134,8 +139,10 @@ After loading, background maintenance performs a bounded shallow sweep of neighb
 files and removes orphaned snapshots whose mtime is older than the 7-day delivery TTL. It
 checks metadata for at most 256 candidates and deletes at most 32 files per pass, rotating
 the scan position for later initializations. The current namespace, fresh files, directories
-and symbolic links are retained. Sweeping is serialized with SDK file readers/writers so a
-concurrent atomic write cannot be removed using stale mtime metadata. Inactive files are
+and symbolic links are retained. Each candidate's metadata check and deletion are serialized
+with SDK file readers/writers, so a concurrent atomic write cannot be removed using stale
+mtime metadata. Directory listing occurs outside the disk lock, which is released between
+candidates so the sweep does not hold it for the entire scan. Inactive files are
 cleaned on later store constructions, including the next process start or a new namespace;
 reinitializing an already cached store does not trigger another pass. There is no autonomous
 filesystem timer.
@@ -159,8 +166,10 @@ xcrun simctl list devices available
 xcodebuild -scheme GravitySDK -destination "platform=iOS Simulator,id=SIMULATOR_UDID" CODE_SIGNING_ALLOWED=NO test
 ```
 
-Tests use temporary outbox directories, including SDK singleton integration tests. Simulator
-coverage includes a real CADisplayLink sampling a committed SwiftUI presentation layer (the
+Tests use temporary outbox directories, including SDK singleton integration tests. Slow-load
+integration tests suspend the store queue while running trackView against a local server:
+the first unprotected modal appears after restoration, a protected modal stays blocked, and
+a user change invalidates the waiting request. Simulator coverage also includes a real CADisplayLink sampling a committed SwiftUI presentation layer (the
 package runner's missing scene activity is injected), actual SwiftUI `onDisappear`, and the
 sheet binding/onChange/onWillDismiss/removal path used by swipe and backdrop. Real touch
 gesture recognition and foreground-scene lifecycle still need host-app/device QA.

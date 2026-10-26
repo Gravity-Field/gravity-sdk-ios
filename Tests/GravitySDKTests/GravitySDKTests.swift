@@ -441,6 +441,26 @@ final class DurableVisibleImpressionTests: XCTestCase {
         return (url, VisibleImpressionStore(fileURL: url))
     }
 
+    func testInitialRestoreWaitHasDeadlineAndCanBeCancelledWithoutInventingProtection() async throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathComponent("queue.json")
+        defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
+        let io = DispatchQueue(label: "test.restore-deadline")
+        io.suspend()
+        let store = VisibleImpressionStore(fileURL: file, loadsAsynchronously: true, ioQueue: io)
+        let timedOut = await store.waitUntilLoaded(timeout: 0.01)
+        XCTAssertFalse(timedOut)
+        XCTAssertFalse(store.protects(scope: "A", campaignId: "unrelated"))
+        let waiter = Task { await store.waitUntilLoaded() }
+        await Task.yield()
+        waiter.cancel()
+        let cancelled = await waiter.value
+        XCTAssertFalse(cancelled)
+        io.resume()
+        let restored = await store.waitUntilLoaded()
+        XCTAssertTrue(restored)
+        XCTAssertFalse(store.protects(scope: "A", campaignId: "unrelated"))
+    }
+
     func testAsyncRestoreAndEnqueueProtectBeforeDiskAndSendOnlyAfterPersistence() async throws {
         let (url, seed) = temporaryStore()
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
@@ -451,11 +471,13 @@ final class DurableVisibleImpressionTests: XCTestCase {
         let gate = InAppPresentationGate()
         gate.deliveryPending = { store.protects(scope: "A", campaignId: $0) }
         let request = gate.beginRequest(location: "home", newScreen: true)
-        // Startup cannot reserve before the disk's protection set is known.
-        XCTAssertNil(gate.reserve(campaignId: "restored", request: request))
-        XCTAssertNil(gate.reserve(campaignId: "other", request: request))
+        // An unloaded snapshot must not manufacture protection for any campaign.
+        // The production presentation path awaits restoration before asking the gate.
+        XCTAssertFalse(store.protects(scope: "A", campaignId: "restored"))
+        XCTAssertFalse(store.protects(scope: "A", campaignId: "other"))
         io.resume()
-        await store.waitForPendingWrites()
+        let loaded = await store.waitUntilLoaded()
+        XCTAssertTrue(loaded)
         XCTAssertNil(gate.reserve(campaignId: "restored", request: request))
         XCTAssertNotNil(gate.reserve(campaignId: "other", request: request))
 
@@ -526,7 +548,10 @@ final class DurableVisibleImpressionTests: XCTestCase {
         var record = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(entry)) as? [String: Any])
         record["user"] = "{\"attributes\":{\"email\":\"private@example.test\"}}"
         try JSONSerialization.data(withJSONObject: [record]).write(to: url)
+        let legacyQuarantine = url.appendingPathExtension("corrupt")
+        try Data("legacy private@example.test".utf8).write(to: legacyQuarantine)
         let reloaded = VisibleImpressionStore(fileURL: url)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: legacyQuarantine.path))
         XCTAssertEqual(reloaded.entries.first?.scope, "section/user-A")
         XCTAssertEqual(reloaded.entries.first?.urls, ["original-url"])
         XCTAssertEqual(reloaded.entries.first?.createdAt, entry.createdAt)
@@ -534,12 +559,13 @@ final class DurableVisibleImpressionTests: XCTestCase {
         XCTAssertNil(saved.first?["user"])
         let savedText = String(decoding: try Data(contentsOf: url), as: UTF8.self)
         XCTAssertFalse(savedText.contains("private@example.test"))
-        // Partial corruption must not copy legacy attributes to the quarantine either.
+        // Partial corruption must not create another file containing recovered or raw data.
         try JSONSerialization.data(withJSONObject: [record, ["broken": true]]).write(to: url)
         let recovered = VisibleImpressionStore(fileURL: url)
         XCTAssertEqual(recovered.entries.count, 1)
-        let quarantine = String(decoding: try Data(contentsOf: url.appendingPathExtension("corrupt")), as: UTF8.self)
-        XCTAssertFalse(quarantine.contains("private@example.test"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.appendingPathExtension("corrupt").path))
+        let recoveredText = String(decoding: try Data(contentsOf: url), as: UTF8.self)
+        XCTAssertFalse(recoveredText.contains("private@example.test"))
 
     }
 
@@ -777,7 +803,7 @@ final class DurableVisibleImpressionTests: XCTestCase {
         XCTAssertTrue(VisibleImpressionStore(fileURL: url, now: { time }).entries.isEmpty)
     }
 
-    func testCorruptStoreIsQuarantinedAndMixedRecordsRecover() throws {
+    func testCorruptStoreRecoversWithoutCreatingQuarantine() throws {
         let (url, _) = temporaryStore()
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -787,8 +813,9 @@ final class DurableVisibleImpressionTests: XCTestCase {
         let store = VisibleImpressionStore(fileURL: url, log: { diagnostics.append($0) })
         XCTAssertTrue(store.entries.isEmpty)
         XCTAssertEqual(diagnostics.count, 1)
-        let quarantinedJunk = try Data(contentsOf: url.appendingPathExtension("corrupt"))
-        XCTAssertEqual(quarantinedJunk, Data("[]".utf8))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.appendingPathExtension("corrupt").path))
+        let saved = try Data(contentsOf: url)
+        XCTAssertEqual(saved, Data("[]".utf8))
         let entry = VisibleImpressionStore.Entry(id: UUID(), scope: "A", campaignId: "good", contentId: "event", urls: ["url"])
         var valid = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(entry)) as? [String: Any])
         valid.removeValue(forKey: "createdAt") // v1 migration
@@ -797,9 +824,7 @@ final class DurableVisibleImpressionTests: XCTestCase {
         try mixed.write(to: url)
         let recovered = VisibleImpressionStore(fileURL: url, log: { diagnostics.append($0) })
         XCTAssertEqual(recovered.entries.map { $0.campaignId }, ["good"])
-        let quarantinedMixed = try Data(contentsOf: url.appendingPathExtension("corrupt"))
-        let quarantinedEntries = try JSONDecoder().decode([VisibleImpressionStore.Entry].self, from: quarantinedMixed)
-        XCTAssertEqual(quarantinedEntries.map { $0.campaignId }, ["good"])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.appendingPathExtension("corrupt").path))
         XCTAssertEqual(VisibleImpressionStore(fileURL: url).entries.count, 1)
     }
 

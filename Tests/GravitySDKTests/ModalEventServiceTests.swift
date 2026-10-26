@@ -28,7 +28,7 @@ final class ModalEventServiceTests: XCTestCase {
         GravitySDK.instance.logListener = { level, message in
             guard message.contains("[WRIMPStore]") else { return }
             XCTAssertEqual(level, .error)
-            XCTAssertTrue(message.contains("quarantined"))
+            XCTAssertTrue(message.contains("recovering valid minimal records"))
             diagnostic.fulfill()
         }
         defer { GravitySDK.instance.logListener = nil }

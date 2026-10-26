@@ -1,7 +1,7 @@
 import Foundation
 
 /// Bounded durable storage. UI enqueue establishes protection immediately; a serial
-/// worker persists it before notifying delivery. Restoring protection fences startup.
+/// worker persists it before notifying delivery. Presentation awaits initial restoration.
 internal final class VisibleImpressionStore {
     static let deliveryTimeToLive: TimeInterval = 7 * 24 * 60 * 60
     static let protectionWindow: TimeInterval = 24 * 60 * 60
@@ -53,7 +53,7 @@ internal final class VisibleImpressionStore {
     init(fileURL: URL, now: @escaping () -> Date = Date.init,
          log: @escaping (String) -> Void = { _ in },
          loadsAsynchronously: Bool = false,
-         ioQueue: DispatchQueue = DispatchQueue(label: "GravitySDK.WRIMP.store", qos: .utility),
+         ioQueue: DispatchQueue = DispatchQueue(label: "GravitySDK.WRIMP.store", qos: .userInitiated),
          scheduleMaintenance: @escaping (@escaping () -> Void) -> Void = { work in
              DispatchQueue.global(qos: .utility).async(execute: DispatchWorkItem(block: work))
          }) {
@@ -91,9 +91,7 @@ internal final class VisibleImpressionStore {
     func protects(scope: String, campaignId: String) -> Bool {
         protectionLock.lock()
         let snapshot = protectionSnapshot + Array(stagedProtection.values)
-        let restoring = loading
         protectionLock.unlock()
-        if restoring { return true }
         let time = now()
         return snapshot.contains {
             $0.scope == scope && $0.campaignId == campaignId &&
@@ -129,6 +127,23 @@ internal final class VisibleImpressionStore {
     private func removeStaged(_ id: UUID) {
         protectionLock.lock(); defer { protectionLock.unlock() }
         stagedProtection.removeValue(forKey: id)
+    }
+
+    private var isLoading: Bool {
+        protectionLock.lock(); defer { protectionLock.unlock() }
+        return loading
+    }
+
+    /// Call before automatic presentation decisions, rather than treating unknown
+    /// protection as a campaign ban. Timeout/cancellation never block the main thread.
+    func waitUntilLoaded(timeout: TimeInterval = 5) async -> Bool {
+        guard !Task.isCancelled else { return false }
+        guard isLoading else { return true }
+        guard timeout.isFinite, timeout > 0, timeout <= 60 else { return false }
+        return await PreparationDeadline.run(timeout: timeout) { [self] in
+            await waitForPendingWrites()
+            return true
+        } ?? false
     }
 
     func waitForPendingWrites() async {
@@ -223,14 +238,18 @@ internal final class VisibleImpressionStore {
     }
 
     private func sweepExpiredNamespaces(at time: Date) {
-        Self.diskLock.lock(); defer { Self.diskLock.unlock() }
         let directory = fileURL.deletingLastPathComponent()
         guard let files = try? FileManager.default.contentsOfDirectory(at: directory,
             includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]).sorted(by: { $0.path < $1.path }),
             !files.isEmpty else { return }
+        Self.diskLock.lock()
         let start = Self.sweepOffset % files.count
+        Self.diskLock.unlock()
         var removed = 0
         for step in 0..<min(files.count, Self.sweepScanLimit) {
+            // Check metadata and remove atomically against writers, but yield the disk
+            // lock between candidates so one sweep cannot hold it for the whole scan.
+            Self.diskLock.lock(); defer { Self.diskLock.unlock() }
             let index = (start + step) % files.count
             Self.sweepOffset = (index + 1) % files.count
             let candidate = files[index]
@@ -296,20 +315,7 @@ internal final class VisibleImpressionStore {
         } else { corrupt = true }
         encodedSizes.removeAll()
         pending = decoded
-        if corrupt {
-            do {
-                let quarantine = fileURL.appendingPathExtension("corrupt")
-                if FileManager.default.fileExists(atPath: quarantine.path) { try FileManager.default.removeItem(at: quarantine) }
-                // Retain only decodable minimal records, never raw legacy User/host data.
-                try JSONEncoder().encode(decoded).write(to: quarantine, options: .atomic)
-                try FileManager.default.removeItem(at: fileURL)
-                log("Corrupt WRIMP queue quarantined with sanitized records; valid entries recovered")
-            } catch {
-                unreadable = true
-                log("Unable to quarantine WRIMP queue; original file preserved")
-                return
-            }
-        }
+        if corrupt { log("Corrupt WRIMP queue detected; recovering valid minimal records") }
         do {
             let next = try bounded(liveEntries())
             try prepareDirectory()

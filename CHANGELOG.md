@@ -11,8 +11,9 @@
 - Remove unused full User snapshots/host attributes from the outbox, migrate existing records and sanitize quarantine data; preserve original URL attribution and stable user isolation.
 - Preserve the bounded 60-second EGO-248 fence after closing an appeared modal with no WRIMP URL or failed persistence; explicit close remains valid after the app becomes inactive.
 - Use capped exponential delivery backoff (30 seconds to 15 minutes), resetting on new events and network restoration.
-- Move startup restore, first-frame persistence and namespace cleanup off the UI thread; establish memory protection before dismissal and persist before sending, with a temporary reservation barrier during restore.
-- Recover valid queue records from corrupt files, quarantine sanitized recovery records, preserve temporarily unreadable files, and exclude the queue from device backups.
+- Move startup restore, first-frame persistence and namespace cleanup off the UI thread; establish memory protection before dismissal and persist before sending. Automatic presentation awaits initial restore asynchronously before deciding protection, avoiding skipped first campaigns on a slow cold start; waits are cancellable and bounded to 5 seconds with a local timeout diagnostic.
+- Modal ContentVisibleImpressionEvent callbacks and custom onVisible actions follow the result of background persistence and may arrive after UI dismissal.
+- Recover valid queue records by atomically rewriting corrupt files without redundant quarantine copies; remove legacy quarantine files on load, preserve temporarily unreadable files, and exclude the queue from device backups.
 - Emit modal visibility callbacks and custom onVisible actions once for the initial step of an opening; OPEN_STEP no longer emits per-step visibility notifications. Custom onVisible actions now run alongside WRIMP rather than replacing it, retaining their existing best-effort delivery.
 
 ## 1.1.0
