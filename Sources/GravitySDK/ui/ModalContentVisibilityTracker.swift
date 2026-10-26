@@ -16,8 +16,13 @@ struct ModalContentVisibilityTracker<Content: View>: View {
 
 internal struct ModalFrameProbe: UIViewRepresentable {
     let session: ModalImpressionSession
+    var activity: (UIWindow) -> (app: Bool, scene: Bool) = currentActivity
 
-    func makeUIView(context: Context) -> FrameView { FrameView(session: session) }
+    static func currentActivity(_ window: UIWindow) -> (app: Bool, scene: Bool) {
+        (UIApplication.shared.applicationState == .active, window.windowScene?.activationState == .foregroundActive)
+    }
+
+    func makeUIView(context: Context) -> FrameView { FrameView(session: session, activity: activity) }
     func updateUIView(_ uiView: FrameView, context: Context) {}
     static func dismantleUIView(_ uiView: FrameView, coordinator: ()) { uiView.stop() }
 
@@ -28,11 +33,14 @@ internal struct ModalFrameProbe: UIViewRepresentable {
         }
 
         private let session: ModalImpressionSession
+        private let activity: (UIWindow) -> (app: Bool, scene: Bool)
         private let target = TickTarget()
         private(set) var displayLink: CADisplayLink?
 
-        init(session: ModalImpressionSession) {
+        init(session: ModalImpressionSession,
+             activity: @escaping (UIWindow) -> (app: Bool, scene: Bool) = ModalFrameProbe.currentActivity) {
             self.session = session
+            self.activity = activity
             super.init(frame: .zero)
             isUserInteractionEnabled = false
             backgroundColor = .clear
@@ -54,10 +62,11 @@ internal struct ModalFrameProbe: UIViewRepresentable {
 
         func sample() {
             if session.hasFired { stop(); return }
-            guard let window, Self.contentIsVisible(
+            guard let window else { return }
+            let state = activity(window)
+            guard Self.contentIsVisible(
                 rendered: layer.presentation(), window: window,
-                applicationIsActive: UIApplication.shared.applicationState == .active,
-                sceneIsActive: window.windowScene?.activationState == .foregroundActive
+                applicationIsActive: state.app, sceneIsActive: state.scene
             ) else { return }
             session.confirmFrame(isActive: true)
             stop()

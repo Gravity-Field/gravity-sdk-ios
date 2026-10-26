@@ -79,7 +79,7 @@ struct GravityBottomSheetContent: View {
                 cornerRadius: style?.cornerRadius ?? 0,
                 imagePrerollDelay: imagePrerollDelay,
                 onWillDismiss: {
-                    impressionSession.explicitClose(isActive: UIApplication.shared.applicationState == .active)
+                    impressionSession.explicitClose()
                 },
                 onDismiss: onDismiss
             ) {

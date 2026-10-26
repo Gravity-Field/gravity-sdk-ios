@@ -5,7 +5,8 @@ internal final class ModalImpressionSession {
     private let lock = NSRecursiveLock()
     private var appeared = false
     private var fired = false
-    private var persisted = false
+    private var protected = false
+    // True means accepted by the SDK outbox; its staged protection survives UI disposal.
     private let confirm: () -> Bool
     private let release: () -> Void
 
@@ -26,22 +27,22 @@ internal final class ModalImpressionSession {
         fireIfNeeded()
     }
 
-    func explicitClose(isActive: Bool) {
+    func explicitClose() {
         lock.lock(); defer { lock.unlock() }
-        guard isActive, appeared else { return }
+        guard appeared else { return }
         fireIfNeeded()
     }
 
     func disappeared() {
         lock.lock(); defer { lock.unlock() }
         appeared = false
-        if !persisted { release() }
+        if !protected { release() }
     }
 
     private func fireIfNeeded() {
         guard !fired else { return }
         // Set before invoking callbacks, which may synchronously dismiss the UI.
         fired = true
-        persisted = confirm()
+        protected = confirm()
     }
 }

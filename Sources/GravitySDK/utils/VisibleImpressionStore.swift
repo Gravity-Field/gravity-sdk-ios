@@ -1,7 +1,7 @@
 import Foundation
 
-/// Bounded durable storage. Reads/writes are synchronous so a frame/explicit close
-/// cannot outrun persistence; network delivery always follows the atomic write.
+/// Bounded durable storage. UI enqueue establishes protection immediately; a serial
+/// worker persists it before notifying delivery. Restoring protection fences startup.
 internal final class VisibleImpressionStore {
     static let deliveryTimeToLive: TimeInterval = 7 * 24 * 60 * 60
     static let protectionWindow: TimeInterval = 24 * 60 * 60
@@ -14,7 +14,6 @@ internal final class VisibleImpressionStore {
         let campaignId: String
         let contentId: String
         var urls: [String]
-        let user: String
         var createdAt: Date? = Date()
         // Read compatibility with the first outbox version; legacy rejected events are dropped.
         var rejectedUrls: [String]? = nil
@@ -29,22 +28,53 @@ internal final class VisibleImpressionStore {
     private static let sweepRemovalLimit = 32
 
     private let lock = NSLock()
+    private let ioQueue: DispatchQueue
     let fileURL: URL
     private let now: () -> Date
     private let log: (String) -> Void
-    private var pending: [Entry] = []
+    // UI gate reads this snapshot without waiting for a disk mutation to finish.
+    private let protectionLock = NSLock()
+    private var protectionSnapshot: [Entry] = []
+    private var stagedProtection: [UUID: Entry] = [:]
+    private var loading = false
+    private var encodedSizes: [UUID: Int] = [:]
+    private var pending: [Entry] = [] {
+        didSet {
+            protectionLock.lock()
+            protectionSnapshot = pending
+            protectionLock.unlock()
+        }
+    }
     private var inserted: (() -> Void)?
     private var unreadable = false
     private var reportedReadFailure = false
     private var directoryPrepared = false
 
     init(fileURL: URL, now: @escaping () -> Date = Date.init,
-         log: @escaping (String) -> Void = { _ in }) {
+         log: @escaping (String) -> Void = { _ in },
+         loadsAsynchronously: Bool = false,
+         ioQueue: DispatchQueue = DispatchQueue(label: "GravitySDK.WRIMP.store", qos: .utility),
+         scheduleMaintenance: @escaping (@escaping () -> Void) -> Void = { work in
+             DispatchQueue.global(qos: .utility).async(execute: DispatchWorkItem(block: work))
+         }) {
         self.fileURL = fileURL
         self.now = now
         self.log = log
-        sweepExpiredNamespaces()
-        load()
+        self.ioQueue = ioQueue
+        let sweepTime = now()
+        let read = { [self] in
+            lock.lock()
+            load()
+            lock.unlock()
+            protectionLock.lock()
+            loading = false
+            protectionLock.unlock()
+            scheduleMaintenance { [self] in sweepExpiredNamespaces(at: sweepTime) }
+        }
+        if loadsAsynchronously {
+            loading = true
+            ioQueue.async(execute: DispatchWorkItem(block: read))
+        } else { read() }
     }
 
     var entries: [Entry] {
@@ -59,31 +89,74 @@ internal final class VisibleImpressionStore {
 
     /// Protection expires independently of delivery, even during an in-flight send.
     func protects(scope: String, campaignId: String) -> Bool {
-        lock.lock(); defer { lock.unlock() }
+        protectionLock.lock()
+        let snapshot = protectionSnapshot + Array(stagedProtection.values)
+        let restoring = loading
+        protectionLock.unlock()
+        if restoring { return true }
         let time = now()
-        return liveEntries().contains {
+        return snapshot.contains {
             $0.scope == scope && $0.campaignId == campaignId &&
+            !$0.urls.isEmpty && ($0.rejectedUrls ?? []).isEmpty &&
             time.timeIntervalSince($0.createdAt ?? .distantPast) < Self.protectionWindow
         }
     }
 
     func observeInsert(_ callback: @escaping () -> Void) {
-        lock.lock(); defer { lock.unlock() }
+        protectionLock.lock(); defer { protectionLock.unlock() }
         inserted = callback
     }
 
-    func insert(_ entry: Entry) throws {
+    /// The staged entry protects re-open immediately, including while the UI disappears.
+    /// It is deliberately absent from delivery's entries until the atomic write succeeds.
+    func enqueue(_ entry: Entry, completion: @escaping (Result<Void, Error>) -> Void) {
+        protectionLock.lock()
+        stagedProtection[entry.id] = entry
+        protectionLock.unlock()
+        ioQueue.async { [self] in
+            do {
+                try insert(entry, beforeNotification: {
+                    self.removeStaged(entry.id)
+                    completion(.success(()))
+                })
+            } catch {
+                removeStaged(entry.id)
+                completion(.failure(error))
+            }
+        }
+    }
+
+    private func removeStaged(_ id: UUID) {
+        protectionLock.lock(); defer { protectionLock.unlock() }
+        stagedProtection.removeValue(forKey: id)
+    }
+
+    func waitForPendingWrites() async {
+        await withCheckedContinuation { continuation in
+            ioQueue.async { continuation.resume() }
+        }
+    }
+
+    func insert(_ entry: Entry, beforeNotification: () -> Void = {}) throws {
         lock.lock()
         var notify: (() -> Void)?
-        defer { lock.unlock(); notify?() }
+        var persisted = false
+        defer {
+            lock.unlock()
+            if persisted { beforeNotification() }
+            notify?()
+        }
         try requireReadable()
-        guard !pending.contains(where: { $0.id == entry.id }) else { return }
+        guard !pending.contains(where: { $0.id == entry.id }) else { persisted = true; return }
         var entry = entry
         entry.createdAt = min(entry.createdAt ?? now(), now())
         guard try JSONEncoder().encode([entry]).count <= Self.maximumBytes else { throw StoreError.capacityExceeded }
         let next = try bounded(liveEntries() + [entry], keeping: entry.id)
         try save(next)
+        persisted = true
+        protectionLock.lock()
         notify = inserted
+        protectionLock.unlock()
     }
 
     func acknowledge(id: UUID, url: String) throws {
@@ -92,6 +165,7 @@ internal final class VisibleImpressionStore {
         var next = liveEntries()
         guard let index = next.firstIndex(where: { $0.id == id }) else { return }
         next[index].urls.removeAll { $0 == url }
+        encodedSizes.removeValue(forKey: id)
         if next[index].urls.isEmpty { next.remove(at: index) }
         try save(next)
     }
@@ -131,7 +205,14 @@ internal final class VisibleImpressionStore {
         // Array JSON size = encoded records + commas + brackets. Encode each record once,
         // then evict the oldest existing records, preserving the accepted incoming WRIMP.
         let encoder = JSONEncoder()
-        let sizes = try sorted.map { try encoder.encode($0).count }
+        let ids = Set(sorted.map { $0.id })
+        encodedSizes = encodedSizes.filter { ids.contains($0.key) }
+        let sizes = try sorted.map { entry -> Int in
+            if let size = encodedSizes[entry.id] { return size }
+            let size = try encoder.encode(entry).count
+            encodedSizes[entry.id] = size
+            return size
+        }
         var bytes = 2 + sizes.reduce(0, +) + max(0, sizes.count - 1)
         var dropped: Set<Int> = []
         for index in sorted.indices where bytes > Self.maximumBytes && sorted[index].id != id {
@@ -141,7 +222,7 @@ internal final class VisibleImpressionStore {
         return sorted.indices.filter { !dropped.contains($0) }.map { sorted[$0] }
     }
 
-    private func sweepExpiredNamespaces() {
+    private func sweepExpiredNamespaces(at time: Date) {
         Self.diskLock.lock(); defer { Self.diskLock.unlock() }
         let directory = fileURL.deletingLastPathComponent()
         guard let files = try? FileManager.default.contentsOfDirectory(at: directory,
@@ -158,7 +239,7 @@ internal final class VisibleImpressionStore {
                   let values = try? candidate.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .contentModificationDateKey]),
                   values.isRegularFile == true, values.isSymbolicLink != true,
                   let modified = values.contentModificationDate,
-                  now().timeIntervalSince(modified) > Self.deliveryTimeToLive else { continue }
+                  time.timeIntervalSince(modified) > Self.deliveryTimeToLive else { continue }
             do {
                 try FileManager.default.removeItem(at: candidate)
                 removed += 1
@@ -174,6 +255,12 @@ internal final class VisibleImpressionStore {
 
     private func load() {
         Self.diskLock.lock(); defer { Self.diskLock.unlock() }
+        // Old quarantines may contain a full User snapshot. They are diagnostics only.
+        let quarantine = fileURL.appendingPathExtension("corrupt")
+        if FileManager.default.fileExists(atPath: quarantine.path) {
+            do { try FileManager.default.removeItem(at: quarantine) }
+            catch { log("Unable to remove legacy WRIMP quarantine") }
+        }
         let data: Data
         do { data = try Data(contentsOf: fileURL) }
         catch {
@@ -202,17 +289,21 @@ internal final class VisibleImpressionStore {
                         entry.createdAt = now()
                         migrated = true
                     }
+                    if (value as? [String: Any])?["user"] != nil { migrated = true }
                     decoded.append(entry)
                 } else { corrupt = true }
             }
         } else { corrupt = true }
+        encodedSizes.removeAll()
         pending = decoded
         if corrupt {
             do {
                 let quarantine = fileURL.appendingPathExtension("corrupt")
                 if FileManager.default.fileExists(atPath: quarantine.path) { try FileManager.default.removeItem(at: quarantine) }
-                try FileManager.default.moveItem(at: fileURL, to: quarantine)
-                log("Corrupt WRIMP queue quarantined; valid entries recovered")
+                // Retain only decodable minimal records, never raw legacy User/host data.
+                try JSONEncoder().encode(decoded).write(to: quarantine, options: .atomic)
+                try FileManager.default.removeItem(at: fileURL)
+                log("Corrupt WRIMP queue quarantined with sanitized records; valid entries recovered")
             } catch {
                 unreadable = true
                 log("Unable to quarantine WRIMP queue; original file preserved")
@@ -247,7 +338,11 @@ internal final class VisibleImpressionStore {
         let bytes = try JSONEncoder().encode(entries)
         guard bytes.count <= Self.maximumBytes else { throw StoreError.capacityExceeded }
         try prepareDirectory()
+        #if os(iOS)
+        try bytes.write(to: fileURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        #else
         try bytes.write(to: fileURL, options: .atomic)
+        #endif
         pending = entries
         // Atomic replacement creates a new file; reapply the no-backup attribute.
         do { try excludeFromBackup(fileURL) }

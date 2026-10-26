@@ -4,6 +4,67 @@ import UIKit
 @testable import GravitySDK
 
 final class ModalFrameProbeTests: XCTestCase {
+    @MainActor func testRealDisplayLinkConfirmsSwiftUIContent() async throws {
+        let confirmed = expectation(description: "real display-link confirms rendered SwiftUI content")
+        let opening = ModalImpressionSession(confirm: { confirmed.fulfill(); return true }, release: {})
+        // Package tests have no UIWindowScene. Only activity is supplied; sample(), the
+        // CADisplayLink and the committed SwiftUI/Core Animation presentation tree are real.
+        let host = UIHostingController(rootView: Color.red.frame(width: 180, height: 120)
+            .overlay(ModalFrameProbe(session: opening, activity: { _ in (true, true) })))
+        let window = UIWindow(frame: UIScreen.main.bounds)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil }
+        await fulfillment(of: [confirmed], timeout: 3)
+        XCTAssertTrue(opening.hasFired)
+    }
+
+    @MainActor func testSwiftUIRemovalBeforeContentAppearanceDoesNotConfirm() async throws {
+        let mounted = expectation(description: "transparent SwiftUI content mounted")
+        let released = expectation(description: "transparent content removed")
+        let opening = ModalImpressionSession(confirm: { XCTFail("Invisible content is not an impression"); return false },
+            release: { released.fulfill() })
+        let host = UIHostingController(rootView: AnyView(ModalContentVisibilityTracker(session: opening) {
+            Color.red.frame(width: 180, height: 120).onAppear { mounted.fulfill() }
+        }.opacity(0)))
+        let window = UIWindow(frame: UIScreen.main.bounds)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil }
+        await fulfillment(of: [mounted], timeout: 2)
+        host.rootView = AnyView(EmptyView())
+        await fulfillment(of: [released], timeout: 2)
+        XCTAssertFalse(opening.hasFired)
+    }
+
+    @MainActor func testCustomSheetBindingClosesBeforeContentDisappears() async throws {
+        let mounted = expectation(description: "sheet mounted")
+        let appeared = expectation(description: "sheet content appeared")
+        let dismissed = expectation(description: "sheet finished dismissing")
+        let removed = expectation(description: "sheet content removed")
+        let state = SheetState()
+        var callbacks: [String] = []
+        let host = UIHostingController(rootView: SheetHarness(state: state,
+            mounted: { mounted.fulfill() }, appeared: { appeared.fulfill() },
+            willDismiss: { callbacks.append("willDismiss") },
+            disappeared: { callbacks.append("disappeared"); removed.fulfill() },
+            dismissed: { callbacks.append("dismissed"); dismissed.fulfill() }))
+        let window = UIWindow(frame: UIScreen.main.bounds)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil }
+        await fulfillment(of: [mounted], timeout: 2)
+        state.isPresented = true
+        await fulfillment(of: [appeared], timeout: 2)
+        // Swipe and backdrop both set this production binding; exercise its real onChange.
+        state.isPresented = false
+        await fulfillment(of: [dismissed], timeout: 2)
+        XCTAssertEqual(callbacks.first, "willDismiss")
+        await fulfillment(of: [removed], timeout: 2)
+        XCTAssertEqual(callbacks.first, "willDismiss")
+        XCTAssertEqual(callbacks.filter { $0 == "willDismiss" }.count, 1)
+    }
+
     @MainActor func testContentIntersectionOpacityAndActiveSceneUseProductionProbePredicate() {
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 200, height: 200))
         window.isHidden = false
@@ -42,10 +103,12 @@ final class ModalFrameProbeTests: XCTestCase {
             let store = VisibleImpressionStore(fileURL: file, log: { _ in })
             let callback = expectation(description: diskFails ? "disk failure callback" : "missing URL callback")
             callback.assertForOverFulfill = true
-            GravitySDK.initialize(apiKey: "probe-logs", section: UUID().uuidString)
-            var errors = 0
+            let fixture = TemporarySDKFixture()
+            fixture.initialize()
+            let diagnostic = expectation(description: "one local persistence diagnostic")
+            diagnostic.assertForOverFulfill = true
             GravitySDK.instance.logListener = { level, message in
-                if level == .error && message.contains("[ContentEvent]") { errors += 1 }
+                if level == .error && message.contains("[ContentEvent]") { diagnostic.fulfill() }
             }
             defer { GravitySDK.instance.logListener = nil }
             let sdk = GravitySDK(apiKey: "probe", section: "probe", gravityEventCallback: { event in
@@ -69,14 +132,33 @@ final class ModalFrameProbeTests: XCTestCase {
             XCTAssertNotNil(probe.displayLink)
             // Supply a confirmed frame: layer visibility is independently tested above.
             opening.confirmFrame(isActive: true)
-            for _ in 0..<100 { probe.sample(); opening.explicitClose(isActive: true) }
+            for _ in 0..<100 { probe.sample(); opening.explicitClose() }
             XCTAssertTrue(opening.hasFired)
             XCTAssertNil(probe.displayLink)
-            XCTAssertEqual(errors, 1)
-            await fulfillment(of: [callback], timeout: 1)
+            await fulfillment(of: [callback, diagnostic], timeout: 1)
             XCTAssertTrue(store.entries.isEmpty)
             opening.disappeared()
-            XCTAssertNotNil(sdk.presentationGate.reserve(campaignId: "campaign", request: request))
+            XCTAssertNil(sdk.presentationGate.reserve(campaignId: "campaign", request: request))
         }
+    }
+}
+
+private final class SheetState: ObservableObject {
+    @Published var isPresented = false
+}
+
+private struct SheetHarness: View {
+    @ObservedObject var state: SheetState
+    let mounted: () -> Void
+    let appeared: () -> Void
+    let willDismiss: () -> Void
+    let disappeared: () -> Void
+    let dismissed: () -> Void
+
+    var body: some View {
+        CustomSheet(isPresented: $state.isPresented, cornerRadius: 8, imagePrerollDelay: 0,
+            onWillDismiss: willDismiss, onDismiss: dismissed) {
+            Color.red.frame(height: 180).onAppear(perform: appeared).onDisappear(perform: disappeared)
+        }.onAppear(perform: mounted)
     }
 }

@@ -158,6 +158,8 @@ final class InAppPresentationGateTests: XCTestCase {
         let request = gate.beginRequest(location: "home", newScreen: true)
         let first = try XCTUnwrap(gate.reserve(campaignId: "c", request: request))
         XCTAssertTrue(gate.present(first, contentIds: ["c:event"]) { true })
+        gate.visible(contentId: "c:event") // missing URL / disk failure still appeared
+        gate.closed(contentId: "c:event")
         XCTAssertNotNil(gate.reserve(campaignId: "other", request: request))
         time = 59
         XCTAssertNil(gate.reserve(campaignId: "c", request: request))
@@ -297,7 +299,7 @@ final class EngagementTransportTests: XCTestCase {
             let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathComponent("queue.json")
             defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
             let store = VisibleImpressionStore(fileURL: url)
-            try store.insert(.init(id: UUID(), scope: "A", campaignId: "c", contentId: "event", urls: [value], user: "A"))
+            try store.insert(.init(id: UUID(), scope: "A", campaignId: "c", contentId: "event", urls: [value]))
             let transport = transport(statuses: [400])
             let delivery = VisibleImpressionDelivery(send: { try await transport.send(url: $0) },
                 retryable: EngagementTransport.isRetryable,
@@ -327,14 +329,14 @@ final class ModalVisibleImpressionTests: XCTestCase {
             let opening = ModalImpressionSession(confirm: { events += 1; return true }, release: {})
             opening.confirmFrame(isActive: true)
             try await Task.sleep(nanoseconds: UInt64(milliseconds) * 1_000_000)
-            let presentation = InAppPresentation(willClose: { opening.explicitClose(isActive: true) },
+            let presentation = InAppPresentation(willClose: { opening.explicitClose() },
                 performDismiss: { complete in
                     XCTAssertEqual(events, 1) // WRIMP precedes physical dismissal.
                     complete(true)
                 }, didDismiss: { _ in })
             presentation.close()
             opening.confirmFrame(isActive: true) // next OPEN_STEP shares the opening
-            opening.explicitClose(isActive: true)
+            opening.explicitClose()
             XCTAssertEqual(events, 1)
         }
     }
@@ -343,11 +345,11 @@ final class ModalVisibleImpressionTests: XCTestCase {
         var attempts = 0
         var releases = 0
         let opening = ModalImpressionSession(confirm: { attempts += 1; return false }, release: { releases += 1 })
-        opening.explicitClose(isActive: true)
+        opening.explicitClose()
         XCTAssertEqual(attempts, 0)
         for _ in 0..<100 {
             opening.confirmFrame(isActive: true)
-            opening.explicitClose(isActive: true)
+            opening.explicitClose()
         }
         XCTAssertTrue(opening.hasFired)
         XCTAssertEqual(attempts, 1)
@@ -360,10 +362,22 @@ final class ModalVisibleImpressionTests: XCTestCase {
         var releases = 0
         let opening = ModalImpressionSession(confirm: { events += 1; return true }, release: { releases += 1 })
         opening.confirmFrame(isActive: false)
-        opening.explicitClose(isActive: true)
+        opening.explicitClose()
         opening.disappeared()
         XCTAssertEqual(events, 0)
         XCTAssertEqual(releases, 1)
+    }
+
+    func testExplicitCloseAfterInactiveFrameKeepsConfirmedImpression() {
+        var events = 0
+        var releases = 0
+        let opening = ModalImpressionSession(confirm: { events += 1; return true }, release: { releases += 1 })
+        opening.confirmFrame(isActive: true)
+        opening.confirmFrame(isActive: false) // sceneWillResignActive / sceneDidEnterBackground
+        opening.explicitClose()
+        opening.disappeared()
+        XCTAssertEqual(events, 1)
+        XCTAssertEqual(releases, 0)
     }
 
     func testConcurrentDetectorAndCloseUseOneAtomicFlag() {
@@ -371,7 +385,7 @@ final class ModalVisibleImpressionTests: XCTestCase {
         let opening = ModalImpressionSession(confirm: { events += 1; return true }, release: {})
         DispatchQueue.concurrentPerform(iterations: 100) { _ in
             opening.confirmFrame(isActive: true)
-            opening.explicitClose(isActive: true)
+            opening.explicitClose()
         }
         XCTAssertTrue(opening.hasFired)
         XCTAssertEqual(events, 1)
@@ -396,17 +410,144 @@ private actor HeldImpressionSend {
     func finish() { completion?.resume(); completion = nil }
 }
 
+private actor ManualRetryClock {
+    private var delays: [UInt64] = []
+    private var waiter: CheckedContinuation<UInt64, Never>?
+    private var sleepers: [CheckedContinuation<Void, Never>] = []
+
+    func sleep(_ delay: UInt64) async {
+        await withCheckedContinuation { continuation in
+            sleepers.append(continuation)
+            if let waiter { self.waiter = nil; waiter.resume(returning: delay) }
+            else { delays.append(delay) }
+        }
+    }
+
+    func nextDelay() async -> UInt64 {
+        if !delays.isEmpty { return delays.removeFirst() }
+        return await withCheckedContinuation { waiter = $0 }
+    }
+
+    func advance() {
+        let pending = sleepers
+        sleepers.removeAll()
+        pending.forEach { $0.resume() }
+    }
+}
+
 final class DurableVisibleImpressionTests: XCTestCase {
     private func temporaryStore() -> (URL, VisibleImpressionStore) {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathComponent("wrimp.json")
         return (url, VisibleImpressionStore(fileURL: url))
     }
 
+    func testAsyncRestoreAndEnqueueProtectBeforeDiskAndSendOnlyAfterPersistence() async throws {
+        let (url, seed) = temporaryStore()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        try seed.insert(.init(id: UUID(), scope: "A", campaignId: "restored", contentId: "old", urls: ["old-url"]))
+        let io = DispatchQueue(label: "test.WRIMP.io")
+        io.suspend()
+        let store = VisibleImpressionStore(fileURL: url, loadsAsynchronously: true, ioQueue: io)
+        let gate = InAppPresentationGate()
+        gate.deliveryPending = { store.protects(scope: "A", campaignId: $0) }
+        let request = gate.beginRequest(location: "home", newScreen: true)
+        // Startup cannot reserve before the disk's protection set is known.
+        XCTAssertNil(gate.reserve(campaignId: "restored", request: request))
+        XCTAssertNil(gate.reserve(campaignId: "other", request: request))
+        io.resume()
+        await store.waitForPendingWrites()
+        XCTAssertNil(gate.reserve(campaignId: "restored", request: request))
+        XCTAssertNotNil(gate.reserve(campaignId: "other", request: request))
+
+        io.suspend()
+        let entry = VisibleImpressionStore.Entry(id: UUID(), scope: "A", campaignId: "new", contentId: "new-event", urls: ["new-url"])
+        store.enqueue(entry) { result in
+            if case .failure = result { XCTFail("Background persistence should succeed") }
+            XCTAssertFalse(Thread.isMainThread)
+            let disk = VisibleImpressionStore(fileURL: url)
+            XCTAssertTrue(disk.contains(scope: "A", campaignId: "new"))
+        }
+        XCTAssertTrue(store.protects(scope: "A", campaignId: "new"))
+        XCTAssertFalse(store.contains(scope: "A", campaignId: "new")) // not eligible for delivery yet
+        XCTAssertNil(gate.reserve(campaignId: "new", request: request))
+        let counter = AttemptCounter()
+        let delivery = VisibleImpressionDelivery(send: { value in
+            let disk = VisibleImpressionStore(fileURL: url)
+            XCTAssertTrue(disk.entries.contains { $0.urls.contains(value) })
+            _ = await counter.next(value)
+        }, store: store)
+        let drain = Task { await delivery.resumePending() }
+        let beforeWrite = await counter.count("new-url")
+        XCTAssertEqual(beforeWrite, 0)
+        io.resume()
+        await drain.value
+        let sent = await counter.count("new-url")
+        XCTAssertEqual(sent, 1)
+        XCTAssertFalse(store.protects(scope: "A", campaignId: "new"))
+        await delivery.stop()
+    }
+
+    func testExponentialRetryCapsAndResetsOnNetworkRestoreAndInsert() async throws {
+        let (url, store) = temporaryStore()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        try store.insert(.init(id: UUID(), scope: "A", campaignId: "c", contentId: "e", urls: ["original"]))
+        let clock = ManualRetryClock()
+        let delivery = VisibleImpressionDelivery(send: { _ in throw DeliveryFailure.transient },
+            sleep: { _ in }, store: store, retrySleep: { await clock.sleep($0) })
+        await delivery.resumePending()
+        for seconds: UInt64 in [30, 60, 120, 240, 480, 900, 900] {
+            let delay = await clock.nextDelay()
+            XCTAssertEqual(delay, seconds * 1_000_000_000)
+            await clock.advance()
+        }
+        let capped = await clock.nextDelay()
+        XCTAssertEqual(capped, 900_000_000_000)
+        await delivery.networkChanged(available: false)
+        await delivery.networkChanged(available: true)
+        let restored = await clock.nextDelay()
+        XCTAssertEqual(restored, 30_000_000_000)
+        await clock.advance() // includes the cancelled pre-restore timer
+        let afterRestore = await clock.nextDelay()
+        XCTAssertEqual(afterRestore, 60_000_000_000)
+        store.observeInsert { Task { await delivery.resumePending() } }
+        try store.insert(.init(id: UUID(), scope: "A", campaignId: "new", contentId: "e2", urls: ["new"]))
+        let inserted = await clock.nextDelay()
+        XCTAssertEqual(inserted, 30_000_000_000)
+        await delivery.stop()
+        await clock.advance()
+    }
+
+    func testLegacyUserSnapshotIsRemovedOnLoadAndRewrite() throws {
+        let (url, store) = temporaryStore()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let entry = VisibleImpressionStore.Entry(id: UUID(), scope: "section/user-A", campaignId: "campaign",
+            contentId: "event", urls: ["original-url"])
+        try store.insert(entry)
+        var record = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(entry)) as? [String: Any])
+        record["user"] = "{\"attributes\":{\"email\":\"private@example.test\"}}"
+        try JSONSerialization.data(withJSONObject: [record]).write(to: url)
+        let reloaded = VisibleImpressionStore(fileURL: url)
+        XCTAssertEqual(reloaded.entries.first?.scope, "section/user-A")
+        XCTAssertEqual(reloaded.entries.first?.urls, ["original-url"])
+        XCTAssertEqual(reloaded.entries.first?.createdAt, entry.createdAt)
+        let saved = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [[String: Any]])
+        XCTAssertNil(saved.first?["user"])
+        let savedText = String(decoding: try Data(contentsOf: url), as: UTF8.self)
+        XCTAssertFalse(savedText.contains("private@example.test"))
+        // Partial corruption must not copy legacy attributes to the quarantine either.
+        try JSONSerialization.data(withJSONObject: [record, ["broken": true]]).write(to: url)
+        let recovered = VisibleImpressionStore(fileURL: url)
+        XCTAssertEqual(recovered.entries.count, 1)
+        let quarantine = String(decoding: try Data(contentsOf: url.appendingPathExtension("corrupt")), as: UTF8.self)
+        XCTAssertFalse(quarantine.contains("private@example.test"))
+
+    }
+
     func testOfflineCloseReloadRestoreAndUserSectionIsolation() async throws {
         let (url, store) = temporaryStore()
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
         let event = VisibleImpressionStore.Entry(id: UUID(), scope: "section-A/user-A", campaignId: "campaign",
-                                                 contentId: "original", urls: ["https://tracking.test/original?user=A"], user: "user-A")
+                                                 contentId: "original", urls: ["https://tracking.test/original?user=A"])
         try store.insert(event)
         let gate = InAppPresentationGate()
         gate.deliveryPending = { store.protects(scope: "section-A/user-A", campaignId: $0) }
@@ -421,7 +562,7 @@ final class DurableVisibleImpressionTests: XCTestCase {
         await delivery.resumePending()
         XCTAssertTrue(store.contains(scope: "section-A/user-A", campaignId: "campaign"))
         let reloaded = VisibleImpressionStore(fileURL: url)
-        XCTAssertEqual(reloaded.entries.first?.user, "user-A")
+        XCTAssertEqual(reloaded.entries.first?.scope, "section-A/user-A")
         XCTAssertFalse(reloaded.contains(scope: "section-A/user-B", campaignId: "campaign"))
         XCTAssertFalse(reloaded.contains(scope: "section-B/user-A", campaignId: "campaign"))
         let restored = VisibleImpressionDelivery(send: { value in
@@ -436,7 +577,7 @@ final class DurableVisibleImpressionTests: XCTestCase {
     func testQueuedEventWaitsForSdkStartAndThenDeliversOnce() async throws {
         let (url, store) = temporaryStore()
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
-        try store.insert(.init(id: UUID(), scope: "A", campaignId: "c", contentId: "event", urls: ["pending"], user: "A"))
+        try store.insert(.init(id: UUID(), scope: "A", campaignId: "c", contentId: "event", urls: ["pending"]))
         let counter = AttemptCounter()
         let delivery = VisibleImpressionDelivery(send: { _ = await counter.next($0) }, store: store, startsSuspended: true)
         await delivery.resumePending()
@@ -456,7 +597,7 @@ final class DurableVisibleImpressionTests: XCTestCase {
         let counter = AttemptCounter()
         let delivery = VisibleImpressionDelivery(send: { _ = await counter.next($0) }, store: store)
         for _ in 0..<2 {
-            try store.insert(.init(id: UUID(), scope: "A", campaignId: "c", contentId: "event", urls: ["same"], user: "A"))
+            try store.insert(.init(id: UUID(), scope: "A", campaignId: "c", contentId: "event", urls: ["same"]))
             await delivery.resumePending()
             XCTAssertTrue(store.entries.isEmpty)
         }
@@ -467,7 +608,7 @@ final class DurableVisibleImpressionTests: XCTestCase {
     func testPermanentRejectionDropsEventAndReleasesProtection() async throws {
         let (url, store) = temporaryStore()
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
-        try store.insert(.init(id: UUID(), scope: "A", campaignId: "c", contentId: "event", urls: ["bad"], user: "A"))
+        try store.insert(.init(id: UUID(), scope: "A", campaignId: "c", contentId: "event", urls: ["bad"]))
         let gate = InAppPresentationGate()
         gate.deliveryScope = { "A" }
         let request = gate.beginRequest(location: "home", newScreen: true)
@@ -502,7 +643,7 @@ final class DurableVisibleImpressionTests: XCTestCase {
         let request = gate.beginRequest(location: "home", newScreen: true)
         let reservation = try XCTUnwrap(gate.reserve(campaignId: "c", request: request))
         XCTAssertTrue(gate.present(reservation, contentIds: ["event"]) { true })
-        try store.insert(.init(id: UUID(), scope: "A", campaignId: "c", contentId: "event", urls: ["original-A"], user: "A", createdAt: shownAt))
+        try store.insert(.init(id: UUID(), scope: "A", campaignId: "c", contentId: "event", urls: ["original-A"], createdAt: shownAt))
         gate.deliveryPending = { store.protects(scope: "A", campaignId: $0) }
         gate.visible(contentId: "event", durable: true)
         time = shownAt.addingTimeInterval(86_399)
@@ -546,7 +687,7 @@ final class DurableVisibleImpressionTests: XCTestCase {
         let shownAt = Date(timeIntervalSince1970: 1000)
         var time = shownAt.addingTimeInterval(86_399)
         let store = VisibleImpressionStore(fileURL: url, now: { time })
-        try store.insert(.init(id: UUID(), scope: "A", campaignId: "c", contentId: "event", urls: ["held"], user: "A", createdAt: shownAt))
+        try store.insert(.init(id: UUID(), scope: "A", campaignId: "c", contentId: "event", urls: ["held"], createdAt: shownAt))
         let gate = InAppPresentationGate()
         gate.deliveryPending = { store.protects(scope: "A", campaignId: $0) }
         let request = gate.beginRequest(location: "home", newScreen: true)
@@ -570,8 +711,7 @@ final class DurableVisibleImpressionTests: XCTestCase {
         let store = VisibleImpressionStore(fileURL: url, now: { time })
         for index in 1...4 {
             time = time.addingTimeInterval(1)
-            try store.insert(.init(id: UUID(), scope: "A", campaignId: "c-\(index)", contentId: "event", urls: ["url-\(index)"],
-                user: String(repeating: "x", count: 270_000), createdAt: time))
+            try store.insert(.init(id: UUID(), scope: "A", campaignId: "c-\(index)", contentId: "event", urls: ["url-\(index)" + String(repeating: "x", count: 270_000)], createdAt: time))
         }
         XCTAssertEqual(store.entries.map { $0.campaignId }, ["c-2", "c-3", "c-4"])
         XCTAssertFalse(store.protects(scope: "A", campaignId: "c-1"))
@@ -579,10 +719,9 @@ final class DurableVisibleImpressionTests: XCTestCase {
         let bytes = try Data(contentsOf: url)
         XCTAssertTrue(bytes.count <= 1_048_576)
         let reload = VisibleImpressionStore(fileURL: url, now: { time })
-        XCTAssertEqual(reload.entries.map { $0.urls }, [["url-2"], ["url-3"], ["url-4"]])
+        XCTAssertEqual(reload.entries.map { $0.urls }, [2, 3, 4].map { ["url-\($0)" + String(repeating: "x", count: 270_000)] })
         // Insertion priority does not depend on the caller's timestamp (e.g. clock correction).
-        try store.insert(.init(id: UUID(), scope: "A", campaignId: "incoming", contentId: "event", urls: ["new-url"],
-            user: String(repeating: "x", count: 270_000), createdAt: Date(timeIntervalSince1970: 1000)))
+        try store.insert(.init(id: UUID(), scope: "A", campaignId: "incoming", contentId: "event", urls: ["new-url" + String(repeating: "x", count: 270_000)], createdAt: Date(timeIntervalSince1970: 1000)))
         XCTAssertEqual(store.entries.map { $0.campaignId }, ["incoming", "c-3", "c-4"])
     }
 
@@ -608,12 +747,12 @@ final class DurableVisibleImpressionTests: XCTestCase {
         try FileManager.default.setAttributes([.modificationDate: time], ofItemAtPath: fresh.path)
         try FileManager.default.setAttributes([.modificationDate: stale], ofItemAtPath: unrelated.path)
         try FileManager.default.setAttributes([.modificationDate: stale], ofItemAtPath: current.path)
-        _ = VisibleImpressionStore(fileURL: current, now: { time })
+        _ = VisibleImpressionStore(fileURL: current, now: { time }, scheduleMaintenance: { $0() })
         XCTAssertEqual(expired.filter { FileManager.default.fileExists(atPath: $0.path) }.count, 8)
         XCTAssertTrue(FileManager.default.fileExists(atPath: fresh.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: unrelated.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: current.path))
-        _ = VisibleImpressionStore(fileURL: current, now: { time })
+        _ = VisibleImpressionStore(fileURL: current, now: { time }, scheduleMaintenance: { $0() })
         XCTAssertFalse(expired.contains { FileManager.default.fileExists(atPath: $0.path) })
     }
 
@@ -626,7 +765,7 @@ final class DurableVisibleImpressionTests: XCTestCase {
         let request = gate.beginRequest(location: "home", newScreen: true)
         let reservation = try XCTUnwrap(gate.reserve(campaignId: "c", request: request))
         XCTAssertTrue(gate.present(reservation, contentIds: ["event"]) { true })
-        try store.insert(.init(id: UUID(), scope: "A", campaignId: "c", contentId: "event", urls: ["expired"], user: "A", createdAt: time))
+        try store.insert(.init(id: UUID(), scope: "A", campaignId: "c", contentId: "event", urls: ["expired"], createdAt: time))
         gate.deliveryPending = { store.protects(scope: "A", campaignId: $0) }
         gate.visible(contentId: "event", durable: true)
         XCTAssertNil(gate.reserve(campaignId: "c", request: request))
@@ -649,8 +788,8 @@ final class DurableVisibleImpressionTests: XCTestCase {
         XCTAssertTrue(store.entries.isEmpty)
         XCTAssertEqual(diagnostics.count, 1)
         let quarantinedJunk = try Data(contentsOf: url.appendingPathExtension("corrupt"))
-        XCTAssertEqual(quarantinedJunk, junk)
-        let entry = VisibleImpressionStore.Entry(id: UUID(), scope: "A", campaignId: "good", contentId: "event", urls: ["url"], user: "A")
+        XCTAssertEqual(quarantinedJunk, Data("[]".utf8))
+        let entry = VisibleImpressionStore.Entry(id: UUID(), scope: "A", campaignId: "good", contentId: "event", urls: ["url"])
         var valid = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(entry)) as? [String: Any])
         valid.removeValue(forKey: "createdAt") // v1 migration
         valid["futureField"] = "ignored"
@@ -659,7 +798,8 @@ final class DurableVisibleImpressionTests: XCTestCase {
         let recovered = VisibleImpressionStore(fileURL: url, log: { diagnostics.append($0) })
         XCTAssertEqual(recovered.entries.map { $0.campaignId }, ["good"])
         let quarantinedMixed = try Data(contentsOf: url.appendingPathExtension("corrupt"))
-        XCTAssertEqual(quarantinedMixed, mixed)
+        let quarantinedEntries = try JSONDecoder().decode([VisibleImpressionStore.Entry].self, from: quarantinedMixed)
+        XCTAssertEqual(quarantinedEntries.map { $0.campaignId }, ["good"])
         XCTAssertEqual(VisibleImpressionStore(fileURL: url).entries.count, 1)
     }
 
@@ -669,14 +809,14 @@ final class DurableVisibleImpressionTests: XCTestCase {
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         var diagnostics: [String] = []
         let store = VisibleImpressionStore(fileURL: url, log: { diagnostics.append($0) })
-        let entry = VisibleImpressionStore.Entry(id: UUID(), scope: "A", campaignId: "new", contentId: "event", urls: ["url"], user: "A")
+        let entry = VisibleImpressionStore.Entry(id: UUID(), scope: "A", campaignId: "new", contentId: "event", urls: ["url"])
         do { try store.insert(entry); XCTFail("Unreadable queue must never be overwritten") } catch {}
         XCTAssertEqual(diagnostics.count, 1)
         var isDirectory: ObjCBool = false
         XCTAssertTrue(FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory))
         XCTAssertTrue(isDirectory.boolValue)
         try FileManager.default.removeItem(at: url)
-        let old = VisibleImpressionStore.Entry(id: UUID(), scope: "A", campaignId: "old", contentId: "event", urls: ["url"], user: "A")
+        let old = VisibleImpressionStore.Entry(id: UUID(), scope: "A", campaignId: "old", contentId: "event", urls: ["url"])
         try JSONEncoder().encode([old]).write(to: url)
         try store.insert(entry)
         XCTAssertEqual(Set(store.entries.map { $0.campaignId }), Set(["old", "new"]))
@@ -689,13 +829,13 @@ final class DurableVisibleImpressionTests: XCTestCase {
         let store = VisibleImpressionStore(fileURL: url, now: { time })
         for index in 0...VisibleImpressionStore.maximumEntries {
             time = time.addingTimeInterval(1)
-            try store.insert(.init(id: UUID(), scope: "A", campaignId: "c-\(index)", contentId: "event", urls: ["url"], user: "A", createdAt: time))
+            try store.insert(.init(id: UUID(), scope: "A", campaignId: "c-\(index)", contentId: "event", urls: ["url"], createdAt: time))
         }
         XCTAssertEqual(store.entries.count, 256)
         XCTAssertFalse(store.contains(scope: "A", campaignId: "c-0"))
         XCTAssertTrue(store.contains(scope: "A", campaignId: "c-256"))
         do {
-            try store.insert(.init(id: UUID(), scope: "A", campaignId: "oversized", contentId: "event", urls: ["url"], user: String(repeating: "x", count: 1_048_577)))
+            try store.insert(.init(id: UUID(), scope: "A", campaignId: "oversized", contentId: "event", urls: [String(repeating: "x", count: 1_048_577)]))
             XCTFail("Oversized write must fail before replacing the queue")
         } catch {}
         XCTAssertEqual(store.entries.count, 256)
@@ -708,7 +848,7 @@ final class DurableVisibleImpressionTests: XCTestCase {
     func testPersistencePrecedesSendAndSuccessfulUrlsAreRemoved() async throws {
         let (url, store) = temporaryStore()
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
-        let event = VisibleImpressionStore.Entry(id: UUID(), scope: "A", campaignId: "c", contentId: "event", urls: ["first", "second"], user: "A")
+        let event = VisibleImpressionStore.Entry(id: UUID(), scope: "A", campaignId: "c", contentId: "event", urls: ["first", "second"])
         try store.insert(event)
         let delivery = VisibleImpressionDelivery(send: { value in
             let disk = VisibleImpressionStore(fileURL: url)

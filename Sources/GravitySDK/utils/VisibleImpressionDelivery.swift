@@ -19,6 +19,9 @@ internal actor VisibleImpressionDelivery {
     private var suspended: Bool
     private var permanentFailures: Set<String> = []
     private var retryTask: Task<Void, Never>?
+    private var retryDelay: UInt64 = 30_000_000_000
+    private var networkAvailable = false
+    private let retrySleep: (UInt64) async throws -> Void
     #if canImport(Network)
     private var monitor: NWPathMonitor?
     #endif
@@ -35,9 +38,11 @@ internal actor VisibleImpressionDelivery {
          retryable: @escaping (Error) -> Bool = { _ in true },
          sleep: @escaping (UInt64) async throws -> Void = { try await Task.sleep(nanoseconds: $0) },
          store: VisibleImpressionStore? = nil,
+         retrySleep: @escaping (UInt64) async throws -> Void = { try await Task.sleep(nanoseconds: $0) },
          startsSuspended: Bool = false,
          discarded: @escaping (VisibleImpressionStore.Entry) -> Void = { _ in },
          acknowledged: @escaping (VisibleImpressionStore.Entry) -> Void = { _ in }) {
+        self.retrySleep = retrySleep
         self.suspended = startsSuspended
         self.store = store
         self.discarded = discarded
@@ -55,7 +60,7 @@ internal actor VisibleImpressionDelivery {
         if monitor == nil {
             let monitor = NWPathMonitor()
             monitor.pathUpdateHandler = { [weak self] path in
-                if path.status == .satisfied { Task { await self?.resumePending() } }
+                Task { await self?.networkChanged(available: path.status == .satisfied) }
             }
             self.monitor = monitor
             monitor.start(queue: DispatchQueue(label: "GravitySDK.WRIMP.network"))
@@ -77,20 +82,37 @@ internal actor VisibleImpressionDelivery {
         if let flight = drainFlight { await flight.task.value }
     }
 
-    func resumePending() async {
+    func networkChanged(available: Bool) async {
+        let restored = available && !networkAvailable
+        networkAvailable = available
+        if restored { await resumePending() }
+    }
+
+    /// External wakeups (insert/start/network restore) reset backoff; a timer does not.
+    func resumePending(resetBackoff: Bool = true) async {
         guard store != nil, !stopped, !suspended else { return }
+        if resetBackoff {
+            retryDelay = 30_000_000_000
+            retryTask?.cancel()
+            retryTask = nil
+        }
         if let flight = drainFlight { await flight.task.value; return }
         let id = UUID()
         let task = Task { await self.drainPending() }
         drainFlight = (id, task)
         await task.value
-        if drainFlight?.id == id { drainFlight = nil }
+        if drainFlight?.id == id {
+            drainFlight = nil
+            scheduleRetry()
+        }
     }
 
     private func drainPending() async {
         guard let store, !stopped else { return }
         retryTask?.cancel()
         retryTask = nil
+        await store.waitForPendingWrites()
+        guard !stopped else { return }
         try? store.prune()
         let liveKeys = Set(store.entries.flatMap { entry in entry.urls.map { entry.id.uuidString + $0 } })
         durableDelivered.formIntersection(liveKeys)
@@ -122,12 +144,21 @@ internal actor VisibleImpressionDelivery {
                 }
             }
         }
-        if !stopped, !store.entries.isEmpty {
-            retryTask = Task { [weak self] in
-                do { try await Task.sleep(nanoseconds: 30_000_000_000) }
-                catch { return }
-                await self?.resumePending()
-            }
+    }
+
+    private func scheduleRetry() {
+        guard !stopped, let store, !store.entries.isEmpty else {
+            retryDelay = 30_000_000_000
+            return
+        }
+        let delay = retryDelay
+        retryDelay = min(retryDelay * 2, 900_000_000_000)
+        retryTask = Task { [weak self, retrySleep] in
+            do {
+                try await retrySleep(delay)
+                try Task.checkCancellation()
+            } catch { return }
+            await self?.resumePending(resetBackoff: false)
         }
     }
 

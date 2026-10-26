@@ -121,8 +121,6 @@ public class GravitySDK {
         inAppPreparation: InAppPreparation?
     ) {
         GravityLogger.configure(logLevel)
-        let previous = _instance
-        previous?.presentationGate.reset()
         let next = GravitySDK(
             apiKey: apiKey,
             section: section,
@@ -132,6 +130,13 @@ public class GravitySDK {
             uiSettings: uiSettings,
             inAppPreparation: inAppPreparation
         )
+        initialize(next, logLevel: logLevel)
+    }
+
+    internal static func initialize(_ next: GravitySDK, logLevel: LogLevel = .error) {
+        GravityLogger.configure(logLevel)
+        let previous = _instance
+        previous?.presentationGate.reset()
         _instance = next
         let predecessor = deliveryTransition
         deliveryTransition = Task {
@@ -152,7 +157,7 @@ public class GravitySDK {
         if let store = impressionStores[namespace] { return store }
         let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("GravitySDK/visible-impressions", isDirectory: true)
-        let store = VisibleImpressionStore(fileURL: root.appendingPathComponent(namespace + ".json"), log: logImpressionStore)
+        let store = VisibleImpressionStore(fileURL: root.appendingPathComponent(namespace + ".json"), log: logImpressionStore, loadsAsynchronously: true)
         impressionStores[namespace] = store
         return store
     }
@@ -161,12 +166,6 @@ public class GravitySDK {
         // Store construction can occur before _instance exists. Defer logging to avoid
         // recursively initializing the singleton through GravityLogger's host listener.
         Task { @MainActor in GravityLogger.e("WRIMPStore", message, sendToBack: false) }
-    }
-
-    internal var impressionUser: String {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = .sortedKeys
-        return String(data: (try? encoder.encode(repository.userForRequest(user))) ?? Data(), encoding: .utf8) ?? ""
     }
 
     internal var impressionScope: String {
@@ -623,7 +622,7 @@ public class GravitySDK {
     ) -> InAppPresentation {
         weak var registered: InAppPresentation?
         let presentation = InAppPresentation(willClose: {
-            impressionSession?.explicitClose(isActive: UIApplication.shared.applicationState == .active)
+            impressionSession?.explicitClose()
         }, performDismiss: performDismiss) { [weak self] success in
             guard let self = self else { return }
             self.inAppPresentations.remove(registered, contentId: content.contentId)
@@ -700,11 +699,11 @@ public class GravitySDK {
     @MainActor internal func makeModalImpressionSession(
         _ content: CampaignContent, _ campaign: Campaign
     ) -> ModalImpressionSession {
-        let (scope, user) = presentationGate.scoped { (impressionScope, impressionUser) }
+        let scope = presentationGate.scoped { impressionScope }
         let openingId = UUID()
         return ModalImpressionSession(confirm: { [self] in
             contentEventService.sendModalVisibleImpression(content, campaign, sdk: self,
-                openingId: openingId, scope: scope, user: user)
+                openingId: openingId, scope: scope)
         }, release: { [weak self] in self?.presentationGate.closed(contentId: content.contentId) })
     }
 

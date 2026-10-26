@@ -12,7 +12,7 @@ final class ModalEventServiceTests: XCTestCase {
         let sdk = GravitySDK(apiKey: "policy", section: "policy", gravityEventCallback: nil,
             productViewBuilder: nil, productFilter: nil, uiSettings: nil, visibleImpressionStore: store)
         try store.insert(.init(id: UUID(), scope: sdk.impressionScope, campaignId: "campaign", contentId: "event",
-            urls: ["original"], user: sdk.impressionUser, createdAt: shownAt))
+            urls: ["original"], createdAt: shownAt))
         let request = sdk.presentationGate.beginRequest(location: "home", newScreen: true)
         time = shownAt.addingTimeInterval(86_399)
         XCTAssertNil(sdk.presentationGate.reserve(campaignId: "campaign", request: request))
@@ -22,7 +22,8 @@ final class ModalEventServiceTests: XCTestCase {
     }
 
     @MainActor func testStoreDiagnosticsUseGravityLoggerAndHostListener() async throws {
-        GravitySDK.initialize(apiKey: "store-log", section: UUID().uuidString)
+        let fixture = TemporarySDKFixture()
+        fixture.initialize()
         let diagnostic = expectation(description: "store diagnostic reaches host listener")
         GravitySDK.instance.logListener = { level, message in
             guard message.contains("[WRIMPStore]") else { return }
@@ -41,14 +42,15 @@ final class ModalEventServiceTests: XCTestCase {
     }
 
     @MainActor func testCloseXAndCancelActionsConfirmBeforeDismissal() {
-        GravitySDK.initialize(apiKey: "ego272-actions", section: UUID().uuidString)
+        let fixture = TemporarySDKFixture()
+        fixture.initialize()
         let content = CampaignContent(contentId: "initial", deliveryMethod: .modal, contentType: "test", step: 0)
         for action in [Action.close, .cancel] {
             var impressions = 0
             var closed = 0
             let opening = ModalImpressionSession(confirm: { impressions += 1; return true }, release: {})
             opening.confirmFrame(isActive: true)
-            let presentation = InAppPresentation(willClose: { opening.explicitClose(isActive: true) },
+            let presentation = InAppPresentation(willClose: { opening.explicitClose() },
                 performDismiss: { complete in
                     XCTAssertEqual(impressions, 1)
                     closed += 1
@@ -67,7 +69,7 @@ final class ModalEventServiceTests: XCTestCase {
         var impressions = 0
         let opening = ModalImpressionSession(confirm: { impressions += 1; return true }, release: {})
         opening.confirmFrame(isActive: true)
-        let presentation = InAppPresentation(willClose: { opening.explicitClose(isActive: true) },
+        let presentation = InAppPresentation(willClose: { opening.explicitClose() },
             performDismiss: { complete in XCTAssertEqual(impressions, 1); complete(true) }, didDismiss: { _ in })
         registry.register(presentation, contentId: "visible")
         registry.dismiss(contentId: "visible") { XCTAssertTrue($0) }
@@ -75,10 +77,44 @@ final class ModalEventServiceTests: XCTestCase {
         XCTAssertEqual(impressions, 1)
     }
 
+    @MainActor func testFirstFrameAndCloseProtectWithoutWaitingForDisk() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let io = DispatchQueue(label: "test.first-frame.WRIMP")
+        let store = VisibleImpressionStore(fileURL: root.appendingPathComponent("queue.json"), ioQueue: io)
+        let persisted = expectation(description: "callback follows background persistence")
+        let sdk = GravitySDK(apiKey: "async", section: "async", gravityEventCallback: { event in
+            if event is ContentVisibleImpressionEvent {
+                XCTAssertEqual(store.entries.count, 1)
+                persisted.fulfill()
+            }
+        }, productViewBuilder: nil, productFilter: nil, uiSettings: nil, visibleImpressionStore: store)
+        let content = CampaignContent(contentId: "content", deliveryMethod: .modal, contentType: "test", step: 0,
+            events: [Event(type: .visibleImpression, urls: ["https://tracking.test/original"])])
+        let campaign = Campaign(payload: [CampaignVariation(campaignId: "campaign", experienceId: "e", variationId: "v", decisionId: "d")])
+        let request = sdk.presentationGate.beginRequest(location: "home", newScreen: true)
+        let reservation = try XCTUnwrap(sdk.presentationGate.reserve(campaignId: "campaign", request: request))
+        XCTAssertTrue(sdk.presentationGate.present(reservation, contentIds: [content.contentId]) { true })
+        let opening = sdk.makeModalImpressionSession(content, campaign)
+        io.suspend()
+        opening.confirmFrame(isActive: true)
+        opening.explicitClose()
+        opening.disappeared()
+        XCTAssertTrue(opening.hasFired)
+        XCTAssertTrue(store.entries.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: store.fileURL.path))
+        let next = sdk.presentationGate.beginRequest(location: "next", newScreen: true)
+        XCTAssertNil(sdk.presentationGate.reserve(campaignId: "campaign", request: next))
+        io.resume()
+        await fulfillment(of: [persisted], timeout: 2)
+        XCTAssertEqual(try Data(contentsOf: store.fileURL).isEmpty, false)
+    }
+
     @MainActor func testModalPersistsBeforeCallbackAndUserChangeKeepsOriginalContext() async throws {
         let callback = expectation(description: "persisted visible impression callback")
         var sdk: GravitySDK!
-        GravitySDK.initialize(apiKey: "ego272-test", section: UUID().uuidString, gravityEventCallback: { event in
+        let fixture = TemporarySDKFixture()
+        fixture.initialize(callback: { event in
             guard event is ContentVisibleImpressionEvent else { return }
             XCTAssertEqual(sdk.visibleImpressionDelivery.store?.entries.count, 1)
             callback.fulfill()
@@ -91,15 +127,15 @@ final class ModalEventServiceTests: XCTestCase {
             events: [Event(type: .visibleImpression, urls: ["https://tracking.test/original?user=A"])])
         let campaign = Campaign(payload: [CampaignVariation(campaignId: "c", experienceId: "e", variationId: "v", decisionId: "d")])
         let success = ContentEventService.instance.sendModalVisibleImpression(content, campaign, sdk: sdk,
-            openingId: UUID(), scope: originalScope, user: sdk.impressionUser)
+            openingId: UUID(), scope: originalScope)
         XCTAssertTrue(success)
         await fulfillment(of: [callback], timeout: 1)
         let store = try XCTUnwrap(sdk.visibleImpressionDelivery.store)
         let entry = try XCTUnwrap(store.entries.first)
         defer { for url in entry.urls { try? store.acknowledge(id: entry.id, url: url) } }
-        let snapshot = try JSONDecoder().decode(User.self, from: Data(entry.user.utf8))
-        XCTAssertEqual(snapshot.custom, "A")
-        XCTAssertEqual(snapshot.ses, "session-A")
+        let saved = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: store.fileURL)) as? [[String: Any]])
+        XCTAssertNil(saved.first?["user"])
+        XCTAssertEqual(entry.scope, originalScope)
         let requestA = sdk.presentationGate.beginRequest(location: "home", newScreen: true)
         XCTAssertNil(sdk.presentationGate.reserve(campaignId: "c", request: requestA))
         sdk.setUser(userId: "B", sessionId: "session-B")
@@ -109,6 +145,6 @@ final class ModalEventServiceTests: XCTestCase {
         let backToA = sdk.presentationGate.beginRequest(location: "home", newScreen: true)
         XCTAssertNil(sdk.presentationGate.reserve(campaignId: "c", request: backToA))
         XCTAssertEqual(store.entries.first?.urls, ["https://tracking.test/original?user=A"])
-        XCTAssertEqual(store.entries.first?.user, entry.user)
+        XCTAssertEqual(store.entries.first?.scope, originalScope)
     }
 }
