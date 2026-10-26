@@ -4,11 +4,14 @@ import Foundation
 internal final class InAppPresentation {
     private var isClosing = false
     private var result: Bool?
+    private let willClose: () -> Void
     private let performDismiss: (@escaping (Bool) -> Void) -> Void
     private let didDismiss: (Bool) -> Void
 
-    init(performDismiss: @escaping (@escaping (Bool) -> Void) -> Void,
+    init(willClose: @escaping () -> Void = {},
+         performDismiss: @escaping (@escaping (Bool) -> Void) -> Void,
          didDismiss: @escaping (Bool) -> Void) {
+        self.willClose = willClose
         self.performDismiss = performDismiss
         self.didDismiss = didDismiss
     }
@@ -16,6 +19,7 @@ internal final class InAppPresentation {
     func close(completion: @escaping (Bool) -> Void = { _ in }) {
         guard result == nil, !isClosing else { completion(false); return }
         isClosing = true
+        willClose()
         performDismiss { [self] success in
             guard result == nil else { return }
             result = success

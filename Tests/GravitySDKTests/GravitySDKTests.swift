@@ -73,6 +73,50 @@ final class InAppPresentationGateTests: XCTestCase {
         XCTAssertNil(gate.reserve(campaignId: "c", request: request))
     }
 
+    func testVisibleOfflineReservationDoesNotExpireOnNavigation() throws {
+        var time: TimeInterval = 0
+        let gate = InAppPresentationGate(now: { time })
+        let request = gate.beginRequest(location: "home", newScreen: true)
+        let reservation = try XCTUnwrap(gate.reserve(campaignId: "c", request: request))
+        XCTAssertTrue(gate.present(reservation, contentIds: ["event"]) { true })
+        gate.visible(contentId: "event", durable: true)
+        gate.closed(contentId: "event")
+        time = 3600
+        let next = gate.beginRequest(location: "next", newScreen: true)
+        XCTAssertNil(gate.reserve(campaignId: "c", request: next))
+    }
+
+    func testReloadedQueueAcknowledgementFencesStaleRequestsButAllowsFreshViews() throws {
+        let gate = InAppPresentationGate()
+        var pending = true
+        gate.deliveryScope = { "A" }
+        gate.deliveryPending = { _ in pending }
+        let stale = gate.beginRequest(location: "home", newScreen: true)
+        XCTAssertNil(gate.reserve(campaignId: "c", request: stale))
+        gate.acknowledgeDelivery(scope: "B", campaignId: "c", contentId: "old")
+        XCTAssertNil(gate.reserve(campaignId: "c", request: stale))
+        gate.acknowledgeDelivery(scope: "A", campaignId: "c", contentId: "old")
+        pending = false
+        XCTAssertNil(gate.reserve(campaignId: "c", request: stale))
+        let fresh = gate.beginRequest(location: "home", newScreen: false)
+        XCTAssertNotNil(gate.reserve(campaignId: "c", request: fresh))
+    }
+
+    func testQueueArrivingAfterReservationCannotPresentAndOldUserAckCannotUnlock() throws {
+        let gate = InAppPresentationGate()
+        gate.deliveryScope = { "B" }
+        let request = gate.beginRequest(location: "home", newScreen: true)
+        let reservation = try XCTUnwrap(gate.reserve(campaignId: "c", request: request))
+        gate.deliveryPending = { _ in true }
+        var shown = false
+        XCTAssertFalse(gate.present(reservation, contentIds: ["event"]) { shown = true; return true })
+        XCTAssertFalse(shown)
+        gate.deliveryPending = { _ in false }
+        XCTAssertTrue(gate.present(reservation, contentIds: ["event"]) { true })
+        gate.acknowledgeDelivery(scope: "A", campaignId: "c", contentId: "event")
+        XCTAssertNil(gate.reserve(campaignId: "c", request: request))
+    }
+
     func testMissingAcknowledgementExpiresAndCampaignsAreIndependent() throws {
         var time: TimeInterval = 0
         let gate = InAppPresentationGate(now: { time })
@@ -220,5 +264,169 @@ final class EngagementTransportTests: XCTestCase {
         let success = await delivery.deliver(urls: ["relative-path"])
         XCTAssertFalse(success)
         XCTAssertTrue(EngagementURLProtocol.requests.isEmpty)
+    }
+}
+
+final class ModalVisibleImpressionTests: XCTestCase {
+    func testFastExplicitCloseAndStepSignalsFireOnce() async throws {
+        for milliseconds in [100, 200, 400] {
+            var events = 0
+            let opening = ModalImpressionSession(confirm: { events += 1; return true }, release: {})
+            opening.confirmFrame(isActive: true)
+            try await Task.sleep(nanoseconds: UInt64(milliseconds) * 1_000_000)
+            let presentation = InAppPresentation(willClose: { opening.explicitClose(isActive: true) },
+                performDismiss: { complete in
+                    XCTAssertEqual(events, 1) // WRIMP precedes physical dismissal.
+                    complete(true)
+                }, didDismiss: { _ in })
+            presentation.close()
+            opening.confirmFrame(isActive: true) // next OPEN_STEP shares the opening
+            opening.explicitClose(isActive: true)
+            XCTAssertEqual(events, 1)
+        }
+    }
+
+    func testCloseRetriesUnpersistedImpressionOnlyAfterAnActualFrame() {
+        var attempts = 0
+        var events = 0
+        let opening = ModalImpressionSession(confirm: {
+            attempts += 1
+            guard attempts > 1 else { return false }
+            events += 1
+            return true
+        }, release: {})
+        opening.explicitClose(isActive: true)
+        XCTAssertEqual(attempts, 0)
+        opening.confirmFrame(isActive: true)
+        XCTAssertEqual(events, 0)
+        opening.explicitClose(isActive: false)
+        XCTAssertEqual(attempts, 1)
+        opening.explicitClose(isActive: true)
+        opening.confirmFrame(isActive: true)
+        XCTAssertEqual(events, 1)
+        XCTAssertEqual(attempts, 2)
+    }
+
+    func testUnappearedAndInactiveDisposalReleasesWithoutImpression() {
+        var events = 0
+        var releases = 0
+        let opening = ModalImpressionSession(confirm: { events += 1; return true }, release: { releases += 1 })
+        opening.confirmFrame(isActive: false)
+        opening.explicitClose(isActive: true)
+        opening.disappeared()
+        XCTAssertEqual(events, 0)
+        XCTAssertEqual(releases, 1)
+    }
+
+    func testConcurrentDetectorAndCloseUseOneAtomicFlag() {
+        var events = 0
+        let opening = ModalImpressionSession(confirm: { events += 1; return true }, release: {})
+        DispatchQueue.concurrentPerform(iterations: 100) { _ in
+            opening.confirmFrame(isActive: true)
+            opening.explicitClose(isActive: true)
+        }
+        XCTAssertTrue(opening.hasFired)
+        XCTAssertEqual(events, 1)
+    }
+}
+
+final class DurableVisibleImpressionTests: XCTestCase {
+    private func temporaryStore() -> (URL, VisibleImpressionStore) {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathComponent("wrimp.json")
+        return (url, VisibleImpressionStore(fileURL: url))
+    }
+
+    func testOfflineCloseReloadRestoreAndUserSectionIsolation() async throws {
+        let (url, store) = temporaryStore()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let event = VisibleImpressionStore.Entry(id: UUID(), scope: "section-A/user-A", campaignId: "campaign",
+                                                 contentId: "original", urls: ["https://tracking.test/original?user=A"], user: "user-A")
+        try store.insert(event)
+        let gate = InAppPresentationGate()
+        gate.deliveryPending = { store.contains(scope: "section-A/user-A", campaignId: $0) }
+        let request = gate.beginRequest(location: "next", newScreen: true)
+        XCTAssertNil(gate.reserve(campaignId: "campaign", request: request))
+        let counter = AttemptCounter()
+        let delivery = VisibleImpressionDelivery(send: { value in
+            XCTAssertEqual(value, "https://tracking.test/original?user=A")
+            _ = await counter.next(value)
+            throw DeliveryFailure.transient
+        }, sleep: { _ in }, store: store)
+        await delivery.resumePending()
+        XCTAssertTrue(store.contains(scope: "section-A/user-A", campaignId: "campaign"))
+        let reloaded = VisibleImpressionStore(fileURL: url)
+        XCTAssertEqual(reloaded.entries.first?.user, "user-A")
+        XCTAssertFalse(reloaded.contains(scope: "section-A/user-B", campaignId: "campaign"))
+        XCTAssertFalse(reloaded.contains(scope: "section-B/user-A", campaignId: "campaign"))
+        let restored = VisibleImpressionDelivery(send: { value in
+            XCTAssertEqual(value, "https://tracking.test/original?user=A")
+        }, store: reloaded)
+        await restored.resumePending()
+        XCTAssertTrue(reloaded.entries.isEmpty)
+        let afterRestart = VisibleImpressionStore(fileURL: url)
+        XCTAssertTrue(afterRestart.entries.isEmpty)
+    }
+
+    func testQueuedEventWaitsForSdkStartAndThenDeliversOnce() async throws {
+        let (url, store) = temporaryStore()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        try store.insert(.init(id: UUID(), scope: "A", campaignId: "c", contentId: "event", urls: ["pending"], user: "A"))
+        let counter = AttemptCounter()
+        let delivery = VisibleImpressionDelivery(send: { _ = await counter.next($0) }, store: store, startsSuspended: true)
+        await delivery.resumePending()
+        let beforeStart = await counter.count("pending")
+        XCTAssertEqual(beforeStart, 0)
+        XCTAssertTrue(store.contains(scope: "A", campaignId: "c"))
+        await delivery.start()
+        let afterStart = await counter.count("pending")
+        XCTAssertEqual(afterStart, 1)
+        XCTAssertTrue(store.entries.isEmpty)
+        await delivery.stop()
+    }
+
+    func testFreshOpeningCanReuseUrlAfterAcknowledgement() async throws {
+        let (url, store) = temporaryStore()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let counter = AttemptCounter()
+        let delivery = VisibleImpressionDelivery(send: { _ = await counter.next($0) }, store: store)
+        for _ in 0..<2 {
+            try store.insert(.init(id: UUID(), scope: "A", campaignId: "c", contentId: "event", urls: ["same"], user: "A"))
+            await delivery.resumePending()
+            XCTAssertTrue(store.entries.isEmpty)
+        }
+        let count = await counter.count("same")
+        XCTAssertEqual(count, 2)
+    }
+
+    func testPermanentRejectionIsPreservedWithoutAutomaticResend() async throws {
+        let (url, store) = temporaryStore()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        try store.insert(.init(id: UUID(), scope: "A", campaignId: "c", contentId: "event", urls: ["bad"], user: "A"))
+        let counter = AttemptCounter()
+        let delivery = VisibleImpressionDelivery(send: { value in
+            _ = await counter.next(value)
+            throw DeliveryFailure.permanent
+        }, retryable: { _ in false }, store: store)
+        await delivery.resumePending()
+        await delivery.resumePending()
+        let count = await counter.count("bad")
+        XCTAssertEqual(count, 1)
+        let reload = VisibleImpressionStore(fileURL: url)
+        XCTAssertEqual(reload.entries.first?.rejectedUrls, ["bad"])
+        XCTAssertTrue(reload.contains(scope: "A", campaignId: "c"))
+    }
+
+    func testPersistencePrecedesSendAndSuccessfulUrlsAreRemoved() async throws {
+        let (url, store) = temporaryStore()
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let event = VisibleImpressionStore.Entry(id: UUID(), scope: "A", campaignId: "c", contentId: "event", urls: ["first", "second"], user: "A")
+        try store.insert(event)
+        let delivery = VisibleImpressionDelivery(send: { value in
+            let disk = VisibleImpressionStore(fileURL: url)
+            XCTAssertTrue(disk.entries.contains { $0.urls.contains(value) })
+            if value == "second" { throw DeliveryFailure.permanent }
+        }, retryable: { _ in false }, store: store)
+        await delivery.resumePending()
+        XCTAssertEqual(store.entries.first?.urls, ["second"])
     }
 }

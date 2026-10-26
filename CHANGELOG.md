@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Count modal, fullscreen and bottom-sheet visible impressions on the first confirmed content frame while active, with one WRIMP per opening across fast explicit close and step transitions.
+- Persist modal WRIMP URLs and original user context before sending; retain campaign protection through offline close/restart, retry on network restoration, and release after server acknowledgement.
+
 ## 1.1.0
 
 - Send all content requests on behalf of the user set via `setUser`, preserving the automatic request user snapshot.

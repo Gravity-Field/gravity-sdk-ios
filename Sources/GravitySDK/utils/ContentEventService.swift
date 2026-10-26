@@ -65,6 +65,33 @@ internal class ContentEventService {
         }
     }
 
+    /// Modal visibility is WRIMP regardless of custom actions, persisted before callbacks/send.
+    func sendModalVisibleImpression(
+        _ content: CampaignContent, _ campaign: Campaign, sdk: GravitySDK,
+        openingId: UUID, scope: String, user: String
+    ) -> Bool {
+        guard let event = content.events?.first(where: { $0.type == .visibleImpression }),
+              !event.urls.isEmpty, let store = sdk.visibleImpressionDelivery.store else {
+            GravityLogger.e("ContentEvent", "Modal visible impression has no tracking URL")
+            return false
+        }
+        do {
+            try store.insert(.init(id: openingId, scope: scope,
+                campaignId: campaign.payload.first?.campaignId ?? content.contentId,
+                contentId: content.contentId, urls: Array(Set(event.urls)), user: user))
+        } catch {
+            GravityLogger.e("ContentEvent", "Unable to persist modal visible impression")
+            return false
+        }
+        sdk.presentationGate.visible(contentId: content.contentId, durable: true)
+        Task { await sdk.visibleImpressionDelivery.resumePending() }
+        sdk.callbackTrackingEvent(ContentVisibleImpressionEvent(content: content, campaign: campaign))
+        if let custom = content.variables?.onVisibleImpression, custom.action != .visibleImpression {
+            trackEngagement(contentAction: custom, content: content)
+        }
+        return true
+    }
+
     func sendContentClosed(
         _ content: CampaignContent,
         _ campaign: Campaign,
