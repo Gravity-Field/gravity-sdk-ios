@@ -3,6 +3,7 @@ import SwiftUI
 struct GravityFullScreenContent: View {
     let content: CampaignContent
     let campaign: Campaign
+    let impressionSession: ModalImpressionSession
     let onClickCallback: (OnClickModel) -> Void
     var item: Item? = nil
 
@@ -36,7 +37,7 @@ struct GravityFullScreenContent: View {
     }
 
     var body: some View {
-        ContentVisibilityTracker(content: content, campaign: campaign) {
+        ModalContentVisibilityTracker(session: impressionSession) {
             ZStack {
                 VStack(alignment: horizontalAlignment) {
                     GravityElements(

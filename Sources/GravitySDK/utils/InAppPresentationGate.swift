@@ -20,8 +20,12 @@ internal final class InAppPresentationGate {
         let reservation: Reservation
         var contentIds: Set<String> = []
         var visible = false
+        var durable = false
         var expiresAt: TimeInterval?
     }
+
+    var deliveryScope: () -> String = { "" }
+    var deliveryPending: (String) -> Bool = { _ in false }
 
     private let lock = NSRecursiveLock()
     private let now: () -> TimeInterval
@@ -52,7 +56,7 @@ internal final class InAppPresentationGate {
         if newScreen || self.location != location {
             screen &+= 1
             self.location = location
-            pending = pending.filter { $0.value.expiresAt != nil }
+            pending = pending.filter { $0.value.visible || $0.value.expiresAt != nil }
         }
         return Request(sequence: sequence, generation: generation, screen: screen)
     }
@@ -76,7 +80,7 @@ internal final class InAppPresentationGate {
         lock.lock()
         defer { lock.unlock() }
         removeExpired()
-        guard isCurrent(request), pending[campaignId] == nil,
+        guard isCurrent(request), !deliveryPending(campaignId), pending[campaignId] == nil,
               request.sequence > (confirmedThrough[campaignId] ?? 0) else { return nil }
         sequence &+= 1
         let reservation = Reservation(id: sequence, campaignId: campaignId,
@@ -91,6 +95,8 @@ internal final class InAppPresentationGate {
         lock.lock()
         defer { lock.unlock() }
         guard reservation.generation == generation, reservation.screen == screen,
+              reservation.id > (confirmedThrough[reservation.campaignId] ?? 0),
+              !deliveryPending(reservation.campaignId),
               var entry = pending[reservation.campaignId],
               entry.reservation == reservation else { return false }
         entry.contentIds.formUnion(contentIds)
@@ -109,11 +115,15 @@ internal final class InAppPresentationGate {
         }
     }
 
-    func visible(contentId: String) {
+    func visible(contentId: String, durable: Bool = false) {
         lock.lock()
         defer { lock.unlock() }
         guard let campaignId = campaign(for: contentId) else { return }
         pending[campaignId]?.visible = true
+        if durable {
+            pending[campaignId]?.durable = true
+            pending[campaignId]?.expiresAt = nil
+        }
     }
 
     func closed(contentId: String) {
@@ -124,6 +134,26 @@ internal final class InAppPresentationGate {
         pending.removeValue(forKey: campaignId)
     }
 
+    func discardDelivery(scope: String, campaignId: String, contentId: String) {
+        lock.lock(); defer { lock.unlock() }
+        guard deliveryScope() == scope, !deliveryPending(campaignId),
+              pending[campaignId]?.durable == true,
+              pending[campaignId]?.contentIds.contains(contentId) == true else { return }
+        pending.removeValue(forKey: campaignId)
+    }
+
+    func acknowledgeDelivery(scope: String, campaignId: String, contentId: String) {
+        lock.lock(); defer { lock.unlock() }
+        guard deliveryScope() == scope else { return }
+        // A reloaded queue has no in-memory reservation, but requests that started
+        // while it was pending must still be fenced off after the ACK.
+        confirmedThrough[campaignId] = sequence
+        trimConfirmed()
+        if pending[campaignId]?.contentIds.contains(contentId) == true {
+            pending.removeValue(forKey: campaignId)
+        }
+    }
+
     func acknowledged(contentId: String) {
         lock.lock()
         defer { lock.unlock() }
@@ -132,6 +162,10 @@ internal final class InAppPresentationGate {
         // the campaign. Do not let it re-present after the reservation is released.
         confirmedThrough[campaignId] = sequence
         pending.removeValue(forKey: campaignId)
+        trimConfirmed()
+    }
+
+    private func trimConfirmed() {
         if confirmedThrough.count > 512,
            let oldest = confirmedThrough.min(by: { $0.value < $1.value })?.key {
             confirmedThrough.removeValue(forKey: oldest)
@@ -144,6 +178,9 @@ internal final class InAppPresentationGate {
 
     private func removeExpired() {
         let time = now()
-        pending = pending.filter { $0.value.expiresAt.map { $0 > time } ?? true }
+        pending = pending.filter { campaignId, entry in
+            if entry.durable { return deliveryPending(campaignId) }
+            return entry.expiresAt.map { $0 > time } ?? true
+        }
     }
 }

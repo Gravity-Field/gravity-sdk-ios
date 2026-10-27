@@ -279,7 +279,7 @@ internal class GravityRepository {
         }
     }
 
-    private func userForRequest(_ customerUser: User?) -> User {
+    func userForRequest(_ customerUser: User?) -> User {
         if let customerUser = customerUser {
             return customerUser
         } else if let userIdCache = userIdCache,

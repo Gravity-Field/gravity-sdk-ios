@@ -3,6 +3,7 @@ import SwiftUI
 struct GravityModalContent: View {
     let content: CampaignContent
     let campaign: Campaign
+    let impressionSession: ModalImpressionSession
     let onClickCallback: (OnClickModel) -> Void
     let onDismiss: () -> Void
     var item: Item? = nil
@@ -45,7 +46,7 @@ struct GravityModalContent: View {
                 .onTapGesture {
                     onDismiss()
                 }
-            ContentVisibilityTracker(content: content, campaign: campaign) {
+            ModalContentVisibilityTracker(session: impressionSession) {
                 ZStack {
                     GeometryReader { geometry in
                         ScrollView {
