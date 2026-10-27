@@ -5,6 +5,8 @@ struct ContentView: View {
     
     @State private var showInlineDemo = false
     @State private var showInlineListDemo = false
+    @State private var showReviewPromptTestConsole = false
+    @ObservedObject private var reviewPromptCoordinator = ReviewPromptCoordinator.shared
     
     var body: some View {
         NavigationStack {
@@ -26,6 +28,16 @@ struct ContentView: View {
                             type: .other,
                             data: [],
                             location: "other"
+                        )
+                    )
+                }
+                
+                Button("Track view search") {
+                    GravitySDK.instance.trackView(
+                        pageContext: PageContext(
+                            type: .search,
+                            data: [],
+                            location: "search"
                         )
                     )
                 }
@@ -88,6 +100,10 @@ struct ContentView: View {
                 Button("Show UITableView with InlineListView") {
                     showInlineListDemo = true
                 }
+
+                Button("Review Prompt Test Console") {
+                    showReviewPromptTestConsole = true
+                }
                 
                 GravityInlineSwiftUIView(
                     selector: "homepage_inline_banner",
@@ -113,6 +129,21 @@ struct ContentView: View {
                         .navigationTitle("Inline List Demo")
                         .navigationBarTitleDisplayMode(.inline)
                 }
+                .navigationDestination(isPresented: $showReviewPromptTestConsole) {
+                    ReviewPromptTestConsoleView()
+                }
+        }
+        .sheet(isPresented: Binding(
+            get: { reviewPromptCoordinator.reviewFormSKU != nil },
+            set: { isPresented in
+                if !isPresented { reviewPromptCoordinator.reviewFormSKU = nil }
+            }
+        )) {
+            if let sku = reviewPromptCoordinator.reviewFormSKU {
+                ReviewFormView(sku: sku) { sku, rating, comment in
+                    ReviewPromptCoordinator.shared.didSubmitReview(sku: sku, rating: rating, comment: comment)
+                }
+            }
         }
     }
 }

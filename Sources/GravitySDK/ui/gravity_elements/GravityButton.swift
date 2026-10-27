@@ -1,10 +1,12 @@
 import SwiftUI
+import UIKit
 import os
 
 struct GravityButton: View {
     let element: Element
     let onClickCallback: (OnClickModel) -> Void
     var item: Item? = nil
+    var enabled: Bool = true
 
     private var style: Style? {
         element.style
@@ -28,6 +30,10 @@ struct GravityButton: View {
         )
     }
 
+    private var isEnabled: Bool {
+        isButtonEnabled(enabled, onClick: element.onClick)
+    }
+
     private var contentAlignment: Alignment {
         style?.contentAlignment?.toAlignment() ?? .center
     }
@@ -42,7 +48,7 @@ struct GravityButton: View {
                 .applyIf(labelFont != nil) {
                     $0.font(labelFont!)
                 }
-                .foregroundColor(textStyle?.color)
+                .foregroundColor(isEnabled ? textStyle?.color : disabledContentColor)
                 .applyIf(style?.padding != nil) {
                     $0.padding(
                         .init(
@@ -68,11 +74,13 @@ struct GravityButton: View {
         }
         .buttonStyle(
             GravityPressButtonStyle(
-                backgroundColor: style?.backgroundColor,
-                pressColor: style?.pressColor,
-                cornerRadius: style?.cornerRadius
+                backgroundColor: isEnabled ? style?.backgroundColor : disabledContainerColor,
+                pressColor: resolvePressColor(style?.pressColor, textColor: textStyle?.color),
+                outlineColor: resolveOutlineColor(style?.outlineColor, enabled: isEnabled),
+                cornerRadius: style?.cornerRadius ?? defaultCornerRadius
             )
         )
+        .disabled(!isEnabled)
         .applyIf(style?.margin != nil) {
             $0.padding(
                 .init(
@@ -89,7 +97,8 @@ struct GravityButton: View {
 private struct GravityPressButtonStyle: ButtonStyle {
     let backgroundColor: Color?
     let pressColor: Color?
-    let cornerRadius: Double?
+    let outlineColor: Color?
+    let cornerRadius: Double
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -99,6 +108,36 @@ private struct GravityPressButtonStyle: ButtonStyle {
                     ? (pressColor ?? .clear)
                     : .clear
             )
-            .cornerRadius(cornerRadius ?? 0)
+            .cornerRadius(cornerRadius)
+            .applyIf(outlineColor != nil) {
+                $0.overlay(
+                    RoundedRectangle(cornerRadius: cornerRadius)
+                        .strokeBorder(outlineColor!, lineWidth: 1)
+                )
+            }
     }
+}
+
+private let disabledOutlineAlpha: CGFloat = 0.4
+private let defaultCornerRadius: Double = 8
+private let defaultPressAlpha: CGFloat = 0.1
+// Material 3 defaults for a disabled filled button: onSurface at 12% / 38%
+private let disabledContainerColor = Color.primary.opacity(0.12)
+private let disabledContentColor = Color.primary.opacity(0.38)
+
+func isButtonEnabled(_ enabled: Bool, onClick: OnClickModel?) -> Bool {
+    enabled && onClick != nil
+}
+
+/// Without an explicit pressColor, mirror the Material 3 pressed overlay:
+/// the content color at 10% alpha.
+func resolvePressColor(_ pressColor: Color?, textColor: Color?) -> Color {
+    if let pressColor { return pressColor }
+    return Color(UIColor(textColor ?? .primary).withAlphaComponent(defaultPressAlpha))
+}
+
+func resolveOutlineColor(_ outlineColor: Color?, enabled: Bool) -> Color? {
+    guard let outlineColor else { return nil }
+    if enabled { return outlineColor }
+    return Color(UIColor(outlineColor).withAlphaComponent(disabledOutlineAlpha))
 }

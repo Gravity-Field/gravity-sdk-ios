@@ -224,19 +224,18 @@ internal class GravityRepository {
         }
     }
 
-    func trackEngagementEvent(urls: [String]) async throws {
-        await withTaskGroup(of: Void.self) { group in
-            for url in urls {
-                if let url = URL(string: url) {
-                    group.addTask {
-                        do {
-                            try await self.performRequest(url: url, method: "GET", body: nil)
-                        } catch {
-                            GravityLogger.e(Self.TAG, "trackEngagementEvent failed: \(error)")
-                        }
-                    }
+    func trackEngagementEvent(urls: [String], apiKey: String? = nil) async throws {
+        let transport = EngagementTransport(session: urlSession)
+        let headers = ["Content-Type": "application/json", "Authorization": "Bearer \(apiKey ?? GravitySDK.instance.apiKey)"]
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            for value in urls {
+                group.addTask {
+                    try await transport.send(url: value, headers: headers,
+                                             logRequest: self.logHttpRequest,
+                                             logResponse: { self.logHttpResponse(response: $0, data: $1, method: "GET") })
                 }
             }
+            try await group.waitForAll()
         }
     }
 
@@ -521,28 +520,5 @@ internal class GravityRepository {
     private struct ByGroupData: ContentRequestData {
         let group: String
         let options: ContentSettings
-    }
-}
-
-enum NetworkError: Error, CustomStringConvertible {
-    case invalidResponse
-    case httpError(statusCode: Int)
-    case decodingError(Error)
-    case encodingError(Error)
-    case invalidURL(String)
-
-    var description: String {
-        switch self {
-        case .invalidResponse:
-            return "Invalid response from server"
-        case .httpError(let statusCode):
-            return "HTTP error: \(statusCode)"
-        case .decodingError(let error):
-            return "Failed to decode response: \(error)"
-        case .encodingError(let error):
-            return "Failed to encode request: \(error)"
-        case .invalidURL(let urlString):
-            return "Invalid URL: \(urlString)"
-        }
     }
 }

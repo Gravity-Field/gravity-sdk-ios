@@ -1,39 +1,20 @@
 import SwiftUI
 
 extension Color {
+    /// Parses `#RRGGBB` (opaque) and `#RRGGBBAA` (alpha last), same as the Flutter SDK. Anything else gives nil.
     init?(hex: String) {
-        var hex = hex.trimmingCharacters(in: .whitespacesAndNewlines)
-        hex = hex.replacingOccurrences(of: "#", with: "")
-        
-        var rgb: UInt64 = 0
-        let length = hex.count
-        
-        if (length == 6) {
-            hex = "\(hex)ff"
-        } else {
-            let rrggbb = String(hex.prefix(6))
-            let aa = String(hex.suffix(2))
-            hex = "\(aa)\(rrggbb)"
-        }
-        
-        guard Scanner(string: hex).scanHexInt64(&rgb) else { return nil }
-        
-        var r, g, b, a: Double
-        
-        if length == 6 { // RRGGBB
-            r = Double((rgb & 0xFF0000) >> 16) / 255.0
-            g = Double((rgb & 0x00FF00) >> 8) / 255.0
-            b = Double(rgb & 0x0000FF) / 255.0
-            a = 1.0
-        } else if length == 8 { // AARRGGBB
-            a = Double((rgb & 0xFF000000) >> 24) / 255.0
-            r = Double((rgb & 0x00FF0000) >> 16) / 255.0
-            g = Double((rgb & 0x0000FF00) >> 8) / 255.0
-            b = Double(rgb & 0x000000FF) / 255.0
-        } else {
-            return nil
-        }
-        
+        guard hex.hasPrefix("#") else { return nil }
+        let hex = hex.dropFirst()
+        guard hex.allSatisfy({ $0.isASCII && $0.isHexDigit }) else { return nil }
+        guard hex.count == 6 || hex.count == 8, let value = UInt32(hex, radix: 16) else { return nil }
+
+        let rgba = hex.count == 6 ? (value << 8) | 0xFF : value
+
+        let r = Double((rgba >> 24) & 0xFF) / 255.0
+        let g = Double((rgba >> 16) & 0xFF) / 255.0
+        let b = Double((rgba >> 8) & 0xFF) / 255.0
+        let a = Double(rgba & 0xFF) / 255.0
+
         self.init(.sRGB, red: r, green: g, blue: b, opacity: a)
     }
 }

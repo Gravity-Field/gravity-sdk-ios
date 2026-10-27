@@ -110,7 +110,7 @@ public struct OnClickModel: Decodable {
         step = try container.decodeIfPresent(Int.self, forKey: .step)
         itemId = try container.decodeIfPresent(String.self, forKey: .itemId)
         url = try container.decodeIfPresent(String.self, forKey: .url)
-        type = try container.decodeIfPresent(FollowUrlType.self, forKey: .type)
+        type = try container.decodeIfPresent(FollowUrlType.self, forKey: .type) ?? .browser
         deeplink = try container.decodeIfPresent(String.self, forKey: .deeplink)
         closeOnClick = try container.decodeIfPresent(Bool.self, forKey: .closeOnClick) ?? true
     }
