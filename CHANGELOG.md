@@ -2,10 +2,12 @@
 
 ## Unreleased
 
-* Add `getContentBySelectorWithDetails` and `getContentByCampaignIdWithDetails`: the model plus the raw JSON of the same response
-* Add `CampaignContent.rawVariables` and key access on `Variables` for keys with no typed counterpart
-* Add `customProps` and `eventTime` to all trigger events; `CustomEvent` also gets `cuid`, `cuidType` and `cart`
-* Events without `eventTime` are sent with the time `triggerEvent` was called
+## 1.2.0
+
+- Add `getContentBySelectorWithDetails` and `getContentByCampaignIdWithDetails`: the model plus the raw JSON of the same response
+- Add `CampaignContent.rawVariables` and key access on `Variables` for keys with no typed counterpart
+- Add `customProps` and `eventTime` to all trigger events; `CustomEvent` also gets `cuid`, `cuidType` and `cart`
+- Events without `eventTime` are sent with the time `triggerEvent` was called
 - Count modal, fullscreen and bottom-sheet visible impressions on the first confirmed content frame while active, with one WRIMP per opening across fast explicit close and step transitions.
 - Persist modal WRIMP URLs and stable user identity scope before sending; retain campaign protection through offline close/restart, retry on network restoration, and release after server acknowledgement.
 - Limit local modal re-open protection to 24 hours from the persisted show timestamp (also during active sends), ending sooner on HTTP 2xx/permanent drop; continue original WRIMP delivery independently for up to 7 days across restart/network restoration, including for no-limit/every-page-view campaigns.
@@ -13,7 +15,7 @@
 - Clean orphaned queue/quarantine namespace files older than the 7-day delivery TTL with a bounded mtime sweep; route store diagnostics through GravityLogger and the host logListener without backend error reports.
 - Stop modal visibility detection after one attempt even when WRIMP is absent or persistence fails; preserve the appearance callback/custom action and log locally once.
 - Remove unused full User snapshots/host attributes from the outbox, migrate existing records and sanitize quarantine data; preserve original URL attribution and stable user isolation.
-- Preserve the bounded 60-second EGO-248 fence after closing an appeared modal with no WRIMP URL or failed persistence; explicit close remains valid after the app becomes inactive.
+- Preserve the bounded 60-second presentation fence after closing an appeared modal with no WRIMP URL or failed persistence; explicit close remains valid after the app becomes inactive.
 - Use capped exponential delivery backoff (30 seconds to 15 minutes), resetting on new events and network restoration.
 - Move startup restore, first-frame persistence and namespace cleanup off the UI thread; establish memory protection before dismissal and persist before sending. Automatic presentation awaits initial restore asynchronously before deciding protection, avoiding skipped first campaigns on a slow cold start; waits are cancellable and bounded to 5 seconds with a local timeout diagnostic.
 - Modal ContentVisibleImpressionEvent callbacks and custom onVisible actions follow the result of background persistence and may arrive after UI dismissal.
