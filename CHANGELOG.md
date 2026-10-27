@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+* Add `getContentBySelectorWithDetails` and `getContentByCampaignIdWithDetails`: the model plus the raw JSON of the same response
+* Add `CampaignContent.rawVariables` and key access on `Variables` for keys with no typed counterpart
+* Add `customProps` and `eventTime` to all trigger events; `CustomEvent` also gets `cuid`, `cuidType` and `cart`
+* Events without `eventTime` are sent with the time `triggerEvent` was called
 - Count modal, fullscreen and bottom-sheet visible impressions on the first confirmed content frame while active, with one WRIMP per opening across fast explicit close and step transitions.
 - Persist modal WRIMP URLs and stable user identity scope before sending; retain campaign protection through offline close/restart, retry on network restoration, and release after server acknowledgement.
 - Limit local modal re-open protection to 24 hours from the persisted show timestamp (also during active sends), ending sooner on HTTP 2xx/permanent drop; continue original WRIMP delivery independently for up to 7 days across restart/network restoration, including for no-limit/every-page-view campaigns.
