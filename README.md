@@ -42,7 +42,7 @@ https://github.com/Gravity-Field/gravity-sdk-ios.git
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/Gravity-Field/gravity-sdk-ios.git", from: "0.0.9")
+    .package(url: "https://github.com/Gravity-Field/gravity-sdk-ios.git", from: "1.1.0")
 ]
 ```
 
@@ -56,6 +56,19 @@ GravitySDK.initialize(
     section: "your-section-id"
 )
 ```
+
+## Настройка демоприложения
+
+Для `Example/GravitySDKDemo` задайте `GRAVITY_DEMO_API_KEY` и `GRAVITY_DEMO_SECTION`
+в переменных окружения локальной схемы Xcode (Edit Scheme → Run → Arguments →
+Environment Variables). Без этих значений приложение покажет инструкцию настройки
+и не будет отправлять запросы в SDK. Не сохраняйте ключ в общей `.xcscheme` в Git.
+
+Используйте отдельный демонстрационный проект и ключ с минимально необходимыми
+правами. Ключ, доступный мобильному клиенту, можно извлечь на устройстве;
+локальная настройка защищает репозиторий, но не делает ключ серверным секретом.
+Если ключ уже был закоммичен, замените его: переписывание истории не удаляет
+чужие клоны и сохранённые версии diff в GitLab.
 
 ## Дополнительные параметры initialize
 
@@ -89,6 +102,8 @@ ProductViewBuilder — это интерфейс, предназначенный
 
 ```swift
 GravitySDK.instance.setUser(userId: "user-id", sessionId: "session-id")
+// После setUser() все последующие запросы SDK, включая запросы контента
+// (getContent*, GravityInlineView, автопоказ in-app), уходят от имени этого пользователя.
 
 GravitySDK.instance.setOptions(
     options: Options(...),
@@ -176,3 +191,63 @@ if GravitySDK.isInitialized {
     // SDK готов к работе
 }
 ```
+
+## Подготовка in-app перед показом
+
+`initialize` принимает необязательный `inAppPreparation`. Обработчик получает контент и кампанию, асинхронно проверяет товары и возвращает контент для показа либо `nil`, чтобы пропустить этот in-app и перейти к следующей кампании.
+
+```swift
+GravitySDK.initialize(
+    apiKey: "your-api-key",
+    section: "your-section-id",
+    productViewBuilder: reviewIntegration.productViewBuilder,
+    inAppPreparation: reviewIntegration.preparation()
+)
+```
+
+[Пример ReviewPromptIntegration](Example/GravitySDKDemo/GravitySDKDemo/ReviewPromptIntegration.swift) включает интерфейс клиентского API eligibility, карточку с кнопкой «Оставить отзыв» и обновление локального статуса через `didSubmitReview(sku:)` после успешной отправки отзыва. Карточка вызывает `dismissInApp`; SDK закрывает sheet и затем вызывает `onOpenReview` для маршрутизации приложения. В demo-приложении пример подключён через [ReviewPromptCoordinator](Example/GravitySDKDemo/GravitySDKDemo/ReviewPromptCoordinator.swift): `DemoReviewEligibilityAPI` проверяет локальный `ReviewStatusStore`, который сохраняется между запусками. Это демонстрация клиентской фильтрации, а не серверное API отзывов. В приложении клиента замените эту проверку обращением к своему API и обновляйте локальный статус только после успешной отправки отзыва.
+
+Обработчик можно написать напрямую:
+
+В примере задайте `selector` кампании отзывов и `fallbackProductViewBuilder` для остальных кампаний. Если у кампании нет selector, ограничьте обработку по `campaign.payload.first?.campaignId`.
+
+```swift
+let preparation = InAppPreparation(timeout: 5) { content, campaign in
+    guard campaign.selector == "purchase-reviews" else { return content }
+    let skus = content.products?.slots?.compactMap { $0.item["sku"] as? String } ?? []
+    guard !skus.isEmpty else { return nil }
+    let eligible = try await reviewAPI.eligibleSkus(Array(Set(skus)))
+    return content.filteringProducts { slot in
+        guard let sku = slot.item["sku"] as? String else { return false }
+        return eligible.contains(sku)
+    }
+}
+```
+
+Порядок: `/choose` → существующий синхронный `productFilter` → content-loaded tracking → задержка кампании → `inAppPreparation` → повторная проверка возможности показа → UI и impression-события. Обработчик применяется к автоматическому показу после `trackView`/`triggerEvent`, а также при `open_step`. Получение через `getContentBy*` и inline-виджеты сохраняют прежнее поведение.
+
+- Без обработчика нет ожидания API. Для других кампаний верните исходный `content`.
+- `filteringProducts` сохраняет исходные слоты, порядок, tracking-данные и метаданные; пустой результат возвращает `nil`. Пустые блоки в других кампаниях не запрещены.
+- Таймаут по умолчанию — 5 секунд. Ошибка, таймаут или некорректный timeout (не положительный, не конечный либо больше часа) пропускают in-app. Используйте отменяемый async API; не блокируйте поток.
+- После ожидания проверяются экран, presentation lock и ревизия пользователя. `setUser` и `lockPresentation` инвалидируют ожидающий показ, даже если затем восстановлено прежнее состояние. При навигации внутри одного контроллера блокируйте показ через `lockPresentation`. После разблокировки нужен новый view/trigger.
+- Пропущенный in-app не отправляет impression/visible impression; content-loaded сохраняет семантику загрузки. Удалённые слоты не монтируются. В своём builder отправляйте клик через `sendProductEngagement`.
+- Используйте recently purchased без fallback на непокупавшиеся товары. Правила доставки/отмены/возврата проверяет API eligibility. Запрашивайте кандидатов с запасом: SDK не восполняет удалённые товары.
+- Перед запуском проверьте пользователя в `/choose` (отдельное исправление EGO-246). Клиентский статус отзывов должен принадлежать текущему аккаунту.
+
+## Закрытие in-app из обычного ProductViewBuilder
+
+Публичный `dismissInApp(contentId:completion:)` закрывает только показанный SDK in-app с указанным `contentId`: modal, bottom sheet, full screen или snackbar. Inline-реквиджеты не закрываются. Тип и сигнатура `ProductViewBuilder` не меняются.
+
+В обработчике кнопки сначала отправьте product click, затем запросите закрытие:
+
+```swift
+GravitySDK.instance.sendProductEngagement(engagement:
+    ProductClickEngagement(slot: slot, content: content, campaign: campaign))
+GravitySDK.instance.dismissInApp(contentId: content.contentId) { dismissed in
+    if dismissed { onOpenReview(sku) }
+}
+```
+
+При успешном закрытии completion вызывается на UI-потоке после анимации и удаления in-app с результатом `true`. Если контент не показан, уже закрывается/закрыт или отсутствует, completion получает `false` без ожидания закрытия. При повторном клике пока идёт закрытие возвращается `false`, чтобы не открывать форму дважды. Close-событие отправляет SDK один раз; вручную отправлять его не нужно. Если нужен переход и при отсутствии in-app, обработайте `false` в своей навигации.
+
+Метод сам не отправляет product click. Кнопку отзывов по-прежнему выбирайте по кампании и используйте текущий builder для обычных рекомендаций.

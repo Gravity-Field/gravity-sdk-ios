@@ -14,6 +14,9 @@ public class GravitySDK {
     internal let productViewBuilder: ProductViewBuilder?
     internal let productFilter: ProductFilter?
     internal let customFont: UIFont?
+    private let inAppPreparation: InAppPreparation?
+    private let presentationRevision = PresentationRevision()
+    private let inAppPresentations = InAppPresentationRegistry()
 
     private init(
         apiKey: String,
@@ -21,13 +24,19 @@ public class GravitySDK {
         gravityEventCallback: GravityEventCallback?,
         productViewBuilder: ProductViewBuilder?,
         productFilter: ProductFilter?,
-        uiSettings: UISettings?
+        uiSettings: UISettings?,
+        inAppPreparation: InAppPreparation? = nil
     ) {
         self.apiKey = apiKey
         self.section = section
+        self.visibleImpressionDelivery = VisibleImpressionDelivery(
+            send: { try await GravityRepository.instance.trackEngagementEvent(urls: [$0], apiKey: apiKey) },
+            retryable: EngagementTransport.isRetryable
+        )
         self.gravityEventCallback = gravityEventCallback
         self.productViewBuilder = productViewBuilder
         self.productFilter = productFilter
+        self.inAppPreparation = inAppPreparation
 
         if let fontName = uiSettings?.fontName {
             let font = UIFont(name: fontName, size: UIFont.labelFontSize)
@@ -74,18 +83,47 @@ public class GravitySDK {
         uiSettings: UISettings? = nil,
         logLevel: LogLevel = .error
     ) {
+        initialize(apiKey: apiKey, section: section, gravityEventCallback: gravityEventCallback,
+                   productViewBuilder: productViewBuilder, productFilter: productFilter,
+                   uiSettings: uiSettings, logLevel: logLevel, inAppPreparation: nil)
+    }
+
+    public static func initialize(
+        apiKey: String,
+        section: String,
+        gravityEventCallback: GravityEventCallback? = nil,
+        productViewBuilder: ProductViewBuilder? = nil,
+        productFilter: ProductFilter? = nil,
+        uiSettings: UISettings? = nil,
+        logLevel: LogLevel = .error,
+        inAppPreparation: InAppPreparation?
+    ) {
         GravityLogger.configure(logLevel)
+        _instance?.presentationGate.reset()
         _instance = GravitySDK(
             apiKey: apiKey,
             section: section,
             gravityEventCallback: gravityEventCallback,
             productViewBuilder: productViewBuilder,
             productFilter: productFilter,
-            uiSettings: uiSettings
+            uiSettings: uiSettings,
+            inAppPreparation: inAppPreparation
         )
     }
 
-    internal var user: User?
+    internal let presentationGate = InAppPresentationGate()
+    internal let visibleImpressionDelivery: VisibleImpressionDelivery
+    private var _user: User?
+    internal var user: User? { presentationGate.scoped { _user } }
+
+    private func automaticRequest(_ pageContext: PageContext, newScreen: Bool)
+        -> (InAppPresentationGate.Request, User?, UInt64) {
+        presentationGate.scoped {
+            if newScreen { presentationRevision.invalidate() }
+            return (presentationGate.beginRequest(location: pageContext.location, newScreen: newScreen),
+                    _user, presentationRevision.current)
+        }
+    }
     private var options = Options()
     private var contentSettings = ContentSettings()
     internal var logListener: GravityLogListener?
@@ -128,7 +166,13 @@ public class GravitySDK {
     public func setUser(userId: String, sessionId: String) {
         guard checkInitialized() else { return }
 
-        user = User(custom: userId, ses: sessionId)
+        presentationGate.scoped {
+            if _user?.custom != userId || _user?.ses != sessionId {
+                presentationGate.reset()
+                presentationRevision.invalidate()
+            }
+            _user = User(custom: userId, ses: sessionId)
+        }
     }
 
     public func setNotificationPermissionStatus(
@@ -155,6 +199,7 @@ public class GravitySDK {
         guard checkInitialized() else { return }
 
         isPresentationLocked = true
+        presentationRevision.invalidate()
         GravityLogger.i(
             prefix: Self.TAG,
             "Presentation lock called, presentation is now locked"
@@ -187,19 +232,23 @@ public class GravitySDK {
     ) {
         guard checkInitialized() else { return }
 
+        let (request, requestUser, revision) = automaticRequest(pageContext, newScreen: true)
         Task {
             do {
                 guard
                     let campaignIdsResponse = await repository.visit(
                         pageContext: pageContext,
                         options: options,
-                        customerUser: user
+                        customerUser: requestUser
                     )
                 else { return }
                 try await handleCampaignIdsResponse(
                     campaignIdsResponse,
                     pageContext,
-                    viewController
+                    viewController,
+                    request: request,
+                    requestUser: requestUser,
+                    revision: revision
                 )
             } catch {
                 GravityLogger.e(Self.TAG, "trackView error:  \(error)")
@@ -214,6 +263,7 @@ public class GravitySDK {
     ) {
         guard checkInitialized() else { return }
 
+        let (request, requestUser, revision) = automaticRequest(pageContext, newScreen: false)
         Task {
             do {
                 guard
@@ -221,13 +271,16 @@ public class GravitySDK {
                         events: events,
                         pageContext: pageContext,
                         options: options,
-                        customerUser: user
+                        customerUser: requestUser
                     )
                 else { return }
                 try await handleCampaignIdsResponse(
                     campaignIdsResponse,
                     pageContext,
-                    viewController
+                    viewController,
+                    request: request,
+                    requestUser: requestUser,
+                    revision: revision
                 )
             } catch {
                 GravityLogger.e(Self.TAG, "triggerEvent error:  \(error)")
@@ -255,6 +308,7 @@ public class GravitySDK {
                 selector: selector,
                 options: options,
                 contentSettings: contentSettings,
+                customerUser: user,
                 pageContext: pageContext
             )
         else { return nil }
@@ -274,6 +328,7 @@ public class GravitySDK {
                 group: groupSelector,
                 options: options,
                 contentSettings: contentSettings,
+                customerUser: user,
                 pageContext: pageContext
             )
         else { return nil }
@@ -286,8 +341,12 @@ public class GravitySDK {
     private func handleCampaignIdsResponse(
         _ response: CampaignIdsResponse,
         _ pageContext: PageContext,
-        _ viewController: UIViewController? = nil
+        _ viewController: UIViewController? = nil,
+        request: InAppPresentationGate.Request,
+        requestUser: User?,
+        revision: UInt64
     ) async throws {
+        guard presentationGate.isCurrent(request) else { return }
         let targetViewController: UIViewController?
         if let viewController {
             targetViewController = viewController
@@ -303,10 +362,15 @@ public class GravitySDK {
         }
 
         for campaignId in sortedByPriority {
+            guard presentationGate.isCurrent(request) else { return }
+            guard let reservation = presentationGate.reserve(campaignId: campaignId.campaignId, request: request) else { continue }
+            var shown = false
+            defer { if !shown { presentationGate.cancel(reservation) } }
             guard
                 let result = await getContentByCampaignId(
                     campaignId.campaignId,
-                    pageContext
+                    pageContext,
+                    requestUser: requestUser
                 )
             else { continue }
 
@@ -335,7 +399,7 @@ public class GravitySDK {
             }
 
             if let delayTime = campaignId.delayTime {
-                try? await Task.sleep(
+                try await Task.sleep(
                     nanoseconds: UInt64(delayTime) * 1_000_000
                 )
             }
@@ -352,9 +416,60 @@ public class GravitySDK {
                 return
             }
 
-            await showBackendContent(targetViewController, content, campaign)
-            return
+            try Task.checkCancellation()
+            shown = await prepareAndShowBackendContent(
+                targetViewController, content, campaign, revision: revision,
+                reservation: reservation, contentIds: payload.contents.map { $0.contentId }
+            )
+            if shown { return }
         }
+    }
+
+    @MainActor private func prepareAndShowBackendContent(
+        _ viewController: UIViewController,
+        _ content: CampaignContent,
+        _ campaign: Campaign,
+        revision: UInt64,
+        reservation: InAppPresentationGate.Reservation? = nil,
+        contentIds: [String] = [],
+        item: Item? = nil
+    ) async -> Bool {
+        guard canPresent(viewController, revision: revision) else { return false }
+
+        guard let prepared = await Self.resolvedContent(content, campaign, preparation: inAppPreparation) else {
+            GravityLogger.i(prefix: Self.TAG, "In-app preparation skipped content \(content.contentId)")
+            return false
+        }
+
+        // Revalidate on the UI actor immediately before presenting, after the asynchronous work.
+        guard canPresent(viewController, revision: revision) else { return false }
+        if let reservation {
+            guard !viewController.isBeingPresented,
+                  prepared.deliveryMethod == .snackBar || viewController.presentedViewController == nil else { return false }
+            return presentationGate.present(reservation, contentIds: contentIds) {
+                self.showBackendContent(viewController, prepared, campaign, item: item)
+            }
+        }
+        return showBackendContent(viewController, prepared, campaign, item: item)
+    }
+
+    /// Without a preparation handler, campaigns pass through unchanged — existing campaigns and
+    /// `productFilter` keep their current behavior. Extracted as a pure, static function so the
+    /// no-handler passthrough and the delegation to `InAppPreparation.prepare` are directly
+    /// testable without the surrounding network/presentation pipeline.
+    internal static func resolvedContent(
+        _ content: CampaignContent,
+        _ campaign: Campaign,
+        preparation: InAppPreparation?
+    ) async -> CampaignContent? {
+        guard let preparation else { return content }
+        return await preparation.prepare(content, campaign)
+    }
+
+    @MainActor private func canPresent(_ viewController: UIViewController, revision: UInt64) -> Bool {
+        GravitySDK.instance === self && presentationRevision.canPresent(expected: revision,
+            active: isViewControllerActive(viewController), locked: isPresentationLocked,
+            cancelled: Task.isCancelled)
     }
 
     public func sendContentEngagement(engagement: ContentEngagement) {
@@ -407,6 +522,33 @@ public class GravitySDK {
         }
     }
 
+    /// Closes the visible SDK in-app with this contentId. Completion runs on the UI thread
+    /// after dismissal; false means no matching presentation was available. Inline widgets are unaffected.
+    public func dismissInApp(contentId: String, completion: @escaping (Bool) -> Void = { _ in }) {
+        guard checkInitialized() else {
+            Task { @MainActor in completion(false) }
+            return
+        }
+        Task { @MainActor in
+            self.inAppPresentations.dismiss(contentId: contentId, completion: completion)
+        }
+    }
+
+    @MainActor private func registerInApp(
+        _ content: CampaignContent, _ campaign: Campaign,
+        performDismiss: @escaping (@escaping (Bool) -> Void) -> Void
+    ) -> InAppPresentation {
+        weak var registered: InAppPresentation?
+        let presentation = InAppPresentation(performDismiss: performDismiss) { [weak self] success in
+            guard let self = self else { return }
+            self.inAppPresentations.remove(registered, contentId: content.contentId)
+            if success { self.contentEventService.sendContentClosed(content, campaign) }
+        }
+        registered = presentation
+        inAppPresentations.register(presentation, contentId: content.contentId)
+        return presentation
+    }
+
     public func getContentByCampaignId(
         _ campaignId: String,
         _ pageContext: PageContext
@@ -420,6 +562,22 @@ public class GravitySDK {
         _ campaignId: String,
         _ pageContext: PageContext
     ) async -> GravityDataResponse<ContentResponse>? {
+        await getContentByCampaignIdWithDetails(campaignId, pageContext, requestUser: user)
+    }
+
+    private func getContentByCampaignId(
+        _ campaignId: String,
+        _ pageContext: PageContext,
+        requestUser: User?
+    ) async -> ContentResponse? {
+        await getContentByCampaignIdWithDetails(campaignId, pageContext, requestUser: requestUser)?.data
+    }
+
+    private func getContentByCampaignIdWithDetails(
+        _ campaignId: String,
+        _ pageContext: PageContext,
+        requestUser: User?
+    ) async -> GravityDataResponse<ContentResponse>? {
         guard checkInitialized() else { return nil }
 
         guard
@@ -427,6 +585,7 @@ public class GravitySDK {
                 campaignId: campaignId,
                 options: options,
                 contentSettings: contentSettings,
+                customerUser: requestUser,
                 pageContext: pageContext
             )
         else { return nil }
@@ -452,20 +611,23 @@ public class GravitySDK {
         }
     }
 
+    @discardableResult
     @MainActor private func showBackendContent(
         _ viewController: UIViewController,
         _ content: CampaignContent,
         _ campaign: Campaign,
         item: Item? = nil
-    ) {
+    ) -> Bool {
         switch content.deliveryMethod {
         case .fullScreen: showFullScreen(content, campaign, viewController, item: item)
         case .modal: showModal(content, campaign, viewController, item: item)
         case .bottomSheet: showBottomSheet(content, campaign, viewController, item: item)
-        case .snackBar: showSnackbar(content, campaign, viewController)
-        case .inline: break
-        case .unknown: break
+        case .snackBar:
+            guard let template = content.templateSystemName, template != .unknown else { return false }
+            showSnackbar(content, campaign, viewController)
+        case .inline, .unknown: return false
         }
+        return true
     }
 
     @MainActor private func showFullScreen(
@@ -474,9 +636,15 @@ public class GravitySDK {
         _ viewController: UIViewController,
         item: Item? = nil
     ) {
+        weak var presentedController: UIViewController?
+        let presentation = registerInApp(content, campaign) { complete in
+            guard let controller = presentedController, controller.presentingViewController != nil else {
+                complete(false); return
+            }
+            controller.dismiss(animated: true) { complete(true) }
+        }
         func dismiss() {
-            contentEventService.sendContentClosed(content, campaign)
-            viewController.dismiss(animated: true)
+            presentation.close()
         }
 
         let fullScreenView = GravityFullScreenContent(
@@ -495,6 +663,7 @@ public class GravitySDK {
         )
 
         let hostingController = UIHostingController(rootView: fullScreenView)
+        presentedController = hostingController
         hostingController.modalPresentationStyle = .fullScreen
 
         viewController.present(hostingController, animated: true)
@@ -506,9 +675,15 @@ public class GravitySDK {
         _ viewController: UIViewController,
         item: Item? = nil
     ) {
+        weak var presentedController: UIViewController?
+        let presentation = registerInApp(content, campaign) { complete in
+            guard let controller = presentedController, controller.presentingViewController != nil else {
+                complete(false); return
+            }
+            controller.dismiss(animated: true) { complete(true) }
+        }
         func dismiss() {
-            contentEventService.sendContentClosed(content, campaign)
-            viewController.dismiss(animated: true)
+            presentation.close()
         }
 
         let modalView = GravityModalContent(
@@ -528,6 +703,7 @@ public class GravitySDK {
         )
 
         let hostingController = UIHostingController(rootView: modalView)
+        presentedController = hostingController
         hostingController.modalPresentationStyle = .overFullScreen
         hostingController.modalTransitionStyle = .crossDissolve
         hostingController.view.backgroundColor = .clear
@@ -542,10 +718,33 @@ public class GravitySDK {
         item: Item? = nil
     ) {
         var requestClose: (() -> Void)?
+        weak var presentedController: UIViewController?
+        var animationFinished = false
+        var pendingCompletion: ((Bool) -> Void)?
+        let presentation = registerInApp(content, campaign) { complete in
+            guard let controller = presentedController, controller.presentingViewController != nil else {
+                complete(false); return
+            }
+            if !animationFinished, let close = requestClose {
+                pendingCompletion = complete
+                close()
+            } else {
+                controller.dismiss(animated: false) { complete(true) }
+            }
+        }
 
-        func dismiss() {
-            contentEventService.sendContentClosed(content, campaign)
-            viewController.dismiss(animated: false)
+        func finishDismiss() {
+            animationFinished = true
+            if let complete = pendingCompletion {
+                pendingCompletion = nil
+                guard let controller = presentedController, controller.presentingViewController != nil else {
+                    complete(false); return
+                }
+                controller.dismiss(animated: false) { complete(true) }
+            } else {
+                // Drag/backdrop dismissal has already finished the sheet animation.
+                presentation.close()
+            }
         }
 
         let fullScreenView = GravityBottomSheetContent(
@@ -558,14 +757,15 @@ public class GravitySDK {
                     content: content,
                     campaign: campaign,
                     viewController: viewController,
-                    dismissCallback: { requestClose?() }
+                    dismissCallback: { presentation.close() }
                 )
             },
-            onDismiss: dismiss,
+            onDismiss: finishDismiss,
             item: item
         )
 
         let hostingController = UIHostingController(rootView: fullScreenView)
+        presentedController = hostingController
         hostingController.modalPresentationStyle = .overFullScreen
         hostingController.view.backgroundColor = .clear
 
@@ -583,17 +783,16 @@ public class GravitySDK {
         weak var weakHostingController:
             UIHostingController<GravitySnackbarContent>?
 
-        var isDismissed = false
-
-        func dismiss() {
-            guard !isDismissed else { return }
-            isDismissed = true
-
-            contentEventService.sendContentClosed(content, campaign)
-            guard let hostingController = weakHostingController else { return }
+        let presentation = registerInApp(content, campaign) { complete in
+            guard let hostingController = weakHostingController,
+                  hostingController.view.superview != nil else { complete(false); return }
             hostingController.willMove(toParent: nil)
             hostingController.view.removeFromSuperview()
             hostingController.removeFromParent()
+            complete(true)
+        }
+        func dismiss() {
+            presentation.close()
         }
 
         let snackbarView = GravitySnackbarContent(
@@ -680,9 +879,8 @@ public class GravitySDK {
             )
 
         case .followUrl:
-            guard let url = onClickModel.url,
-                let type = onClickModel.type
-            else { return }
+            guard let url = onClickModel.url else { return }
+            let type = onClickModel.type ?? .browser
 
             callbackTrackingEvent(
                 FollowUrlEvent(
@@ -750,11 +948,13 @@ public class GravitySDK {
                 return
             }
 
+            let revision = presentationRevision.current
             Task { @MainActor in
-                self.showBackendContent(
+                await self.prepareAndShowBackendContent(
                     viewController,
                     targetContent,
                     campaign,
+                    revision: revision,
                     item: item
                 )
             }

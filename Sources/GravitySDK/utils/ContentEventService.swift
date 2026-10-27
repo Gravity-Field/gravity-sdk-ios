@@ -8,6 +8,7 @@ internal class ContentEventService {
 
     private let repository = GravityRepository.instance
 
+
     func sendContentLoaded(
         _ content: CampaignContent,
         _ campaign: Campaign,
@@ -43,14 +44,25 @@ internal class ContentEventService {
         _ campaign: Campaign,
         callbackTrackingEvent: Bool = true
     ) {
+        let sdk = GravitySDK.instance
+        sdk.presentationGate.visible(contentId: content.contentId)
         if callbackTrackingEvent {
-            GravitySDK.instance.callbackTrackingEvent(
-                ContentVisibleImpressionEvent(content: content, campaign: campaign)
-            )
+            sdk.callbackTrackingEvent(ContentVisibleImpressionEvent(content: content, campaign: campaign))
         }
-        
-        guard let onVisibleImpression = content.variables?.onVisibleImpression else { return }
-        trackEngagement(contentAction: onVisibleImpression, content: content)
+        // Visibility is a tracking event even when no custom onVisible action is configured.
+        let action = content.variables?.onVisibleImpression?.action ?? .visibleImpression
+        guard let event = content.events?.first(where: { $0.type == action }), !event.urls.isEmpty else {
+            GravityLogger.e("ContentEvent", "Visible impression has no tracking URL")
+            return
+        }
+        Task {
+            if await sdk.visibleImpressionDelivery.deliver(urls: event.urls) {
+                if action != .visibleImpression { return }
+                sdk.presentationGate.acknowledged(contentId: content.contentId)
+            } else {
+                GravityLogger.e("ContentEvent", "Visible impression delivery failed after retries")
+            }
+        }
     }
 
     func sendContentClosed(
@@ -58,6 +70,7 @@ internal class ContentEventService {
         _ campaign: Campaign,
         callbackTrackingEvent: Bool = true
     ) {
+        GravitySDK.instance.presentationGate.closed(contentId: content.contentId)
         if callbackTrackingEvent {
             GravitySDK.instance.callbackTrackingEvent(
                 ContentCloseEvent(content: content, campaign: campaign)
@@ -78,7 +91,7 @@ internal class ContentEventService {
         Task {
             do {
                 try await repository.trackEngagementEvent(urls: event.urls)
-            } catch {}
+            } catch { GravityLogger.e("ContentEvent", "Engagement delivery failed: \(error)") }
         }
     }
 }
