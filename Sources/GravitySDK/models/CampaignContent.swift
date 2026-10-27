@@ -35,6 +35,12 @@ public struct CampaignContent: Decodable {
         self.custom = custom
         self.events = events
     }
+
+    /// Raw `variables` object of this content, including keys with no typed
+    /// counterpart in `Variables`. Empty when the content has no variables.
+    public var rawVariables: [String: JSONValue] {
+        variables?.raw ?? [:]
+    }
 }
 
 extension Array where Element == CampaignContent {

@@ -106,13 +106,13 @@ internal class GravityRepository {
         }
     }
 
-    func chooseByCampaignId(
+    func chooseByCampaignIdWithDetails(
         campaignId: String,
         options: Options,
         contentSettings: ContentSettings,
         customerUser: User? = nil,
         pageContext: PageContext
-    ) async -> ContentResponse? {
+    ) async -> GravityDataResponse<ContentResponse>? {
         do {
             let requestBody = ContentRequest(
                 sec: GravitySDK.instance.section,
@@ -128,30 +128,31 @@ internal class GravityRepository {
                 options: options
             )
 
-            let response: ContentResponse = try await performRequest(
+            let data = try await performRequestForData(
                 endpoint: CHOOSE,
                 method: "POST",
                 body: requestBody
             )
+            let response = try parseContentResponse(data)
 
             saveUserIfNeeded(
                 customerUser: customerUser,
-                contentResponseUser: response.user
+                contentResponseUser: response.data.user
             )
             return response
         } catch {
-            GravityLogger.e(Self.TAG, "chooseByCampaignId failed: \(error)")
+            GravityLogger.e(Self.TAG, "chooseByCampaignIdWithDetails failed: \(error)")
             return nil
         }
     }
 
-    func chooseBySelector(
+    func chooseBySelectorWithDetails(
         selector: String,
         options: Options,
         contentSettings: ContentSettings,
         customerUser: User? = nil,
         pageContext: PageContext
-    ) async -> ContentResponse? {
+    ) async -> GravityDataResponse<ContentResponse>? {
         do {
             let requestBody = ContentRequest(
                 sec: GravitySDK.instance.section,
@@ -167,19 +168,20 @@ internal class GravityRepository {
                 options: options
             )
 
-            let response: ContentResponse = try await performRequest(
+            let data = try await performRequestForData(
                 endpoint: CHOOSE,
                 method: "POST",
                 body: requestBody
             )
+            let response = try parseContentResponse(data)
 
             saveUserIfNeeded(
                 customerUser: customerUser,
-                contentResponseUser: response.user
+                contentResponseUser: response.data.user
             )
             return response
         } catch {
-            GravityLogger.e(Self.TAG, "chooseBySelector failed: \(error)")
+            GravityLogger.e(Self.TAG, "chooseBySelectorWithDetails failed: \(error)")
             return nil
         }
     }
@@ -358,6 +360,19 @@ internal class GravityRepository {
         }
     }
 
+    private func performRequestForData(
+        endpoint: String,
+        method: String,
+        body: Encodable? = nil
+    ) async throws -> Data {
+        let urlString = "\(baseUrl)\(endpoint)"
+        guard let url = URL(string: urlString) else {
+            throw NetworkError.invalidURL(urlString)
+        }
+        let (data, _) = try await makeRequest(url: url, method: method, body: body)
+        return data
+    }
+
     private func performRequest(
         url: URL,
         method: String,
@@ -519,5 +534,18 @@ internal class GravityRepository {
     private struct ByGroupData: ContentRequestData {
         let group: String
         let options: ContentSettings
+    }
+}
+
+/// Decodes a /choose answer into the model and the raw JSON of the same bytes.
+func parseContentResponse(_ data: Data) throws -> GravityDataResponse<ContentResponse> {
+    do {
+        let decoder = JSONDecoder()
+        return GravityDataResponse(
+            data: try decoder.decode(ContentResponse.self, from: data),
+            json: try decoder.decode(JSONValue.self, from: data)
+        )
+    } catch {
+        throw NetworkError.decodingError(error)
     }
 }

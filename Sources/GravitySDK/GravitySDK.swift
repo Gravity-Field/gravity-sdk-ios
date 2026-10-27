@@ -292,10 +292,19 @@ public class GravitySDK {
         selector: String,
         pageContext: PageContext
     ) async -> ContentResponse? {
+        await getContentBySelectorWithDetails(selector: selector, pageContext: pageContext)?.data
+    }
+
+    /// Same as `getContentBySelector`, plus the raw JSON of the same response,
+    /// for rendering the content yourself. Does not show anything.
+    public func getContentBySelectorWithDetails(
+        selector: String,
+        pageContext: PageContext
+    ) async -> GravityDataResponse<ContentResponse>? {
         guard checkInitialized() else { return nil }
 
         guard
-            let response = await repository.chooseBySelector(
+            let response = await repository.chooseBySelectorWithDetails(
                 selector: selector,
                 options: options,
                 contentSettings: contentSettings,
@@ -304,21 +313,7 @@ public class GravitySDK {
             )
         else { return nil }
 
-        await withTaskGroup(of: Void.self) { group in
-            for campaign in response.data {
-                for payload in campaign.payload {
-                    for content in payload.contents {
-                        group.addTask {
-                            self.contentEventService.sendContentLoaded(
-                                content,
-                                campaign
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
+        await sendContentLoaded(response.data)
         return response
     }
 
@@ -338,20 +333,7 @@ public class GravitySDK {
             )
         else { return nil }
 
-        await withTaskGroup(of: Void.self) { group in
-            for campaign in response.data {
-                for payload in campaign.payload {
-                    for content in payload.contents {
-                        group.addTask {
-                            self.contentEventService.sendContentLoaded(
-                                content,
-                                campaign
-                            )
-                        }
-                    }
-                }
-            }
-        }
+        await sendContentLoaded(response)
 
         return response
     }
@@ -571,7 +553,16 @@ public class GravitySDK {
         _ campaignId: String,
         _ pageContext: PageContext
     ) async -> ContentResponse? {
-        await getContentByCampaignId(campaignId, pageContext, requestUser: user)
+        await getContentByCampaignIdWithDetails(campaignId, pageContext)?.data
+    }
+
+    /// Same as `getContentByCampaignId`, plus the raw JSON of the same response,
+    /// for rendering the content yourself. Does not show anything.
+    public func getContentByCampaignIdWithDetails(
+        _ campaignId: String,
+        _ pageContext: PageContext
+    ) async -> GravityDataResponse<ContentResponse>? {
+        await getContentByCampaignIdWithDetails(campaignId, pageContext, requestUser: user)
     }
 
     private func getContentByCampaignId(
@@ -579,10 +570,18 @@ public class GravitySDK {
         _ pageContext: PageContext,
         requestUser: User?
     ) async -> ContentResponse? {
+        await getContentByCampaignIdWithDetails(campaignId, pageContext, requestUser: requestUser)?.data
+    }
+
+    private func getContentByCampaignIdWithDetails(
+        _ campaignId: String,
+        _ pageContext: PageContext,
+        requestUser: User?
+    ) async -> GravityDataResponse<ContentResponse>? {
         guard checkInitialized() else { return nil }
 
         guard
-            let response = await repository.chooseByCampaignId(
+            let response = await repository.chooseByCampaignIdWithDetails(
                 campaignId: campaignId,
                 options: options,
                 contentSettings: contentSettings,
@@ -591,6 +590,11 @@ public class GravitySDK {
             )
         else { return nil }
 
+        await sendContentLoaded(response.data)
+        return response
+    }
+
+    private func sendContentLoaded(_ response: ContentResponse) async {
         await withTaskGroup(of: Void.self) { group in
             for campaign in response.data {
                 for payload in campaign.payload {
@@ -605,8 +609,6 @@ public class GravitySDK {
                 }
             }
         }
-
-        return response
     }
 
     @discardableResult
