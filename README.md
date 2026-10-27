@@ -141,7 +141,38 @@ let response = await GravitySDK.instance.getContentBySelector(
     selector: "selector",
     pageContext: PageContext(...),
 )
+
+// модель + сырой JSON того же ответа — для собственной отрисовки
+let details: GravityDataResponse<ContentResponse>? = await GravitySDK.instance.getContentBySelectorWithDetails(
+    selector: "selector",
+    pageContext: PageContext(...),
+)
+// также getContentByCampaignIdWithDetails(campaignId, pageContext)
 ```
+
+`details.json` — весь ответ сервера как `JSONValue` (`.string`, `.integer`, `.number`, `.bool`, `.null`, `.array`, `.object`), включая ключи, которых нет в модели. Методы ничего не показывают: `contentLoaded` уходит как раньше, а impression / visible impression приложение отправляет само через `sendContentEngagement`, когда действительно показало контент.
+
+### Произвольные ключи `variables`
+
+Кроме типизированных полей (`elements`, `frameUI`, …) объект `variables` кампании может содержать любые ключи, заданные в дашборде Gravity. Они доступны без разбора сырого JSON:
+
+- `content.rawVariables` — весь объект `variables` как `[String: JSONValue]` (пустой, если `variables` нет);
+- `content.variables?["<ключ>"]` — значение по ключу (`JSONValue?`: `nil`, если ключа нет, `.null`, если в нём записан `null`);
+- у `JSONValue` есть `stringValue`, `intValue`, `int64Value`, `doubleValue`, `boolValue`, `arrayValue`, `objectValue`, `isNull` и доступ по ключу / индексу для вложенных значений.
+
+```swift
+let campaign = details.data.data[0]
+let content = campaign.payload[0].contents[0]
+
+// A/B-параметр, заданный в кампании
+let color = content.rawVariables["ab_button_color"]?.stringValue
+// ...применили к своему UI, показали — сообщаем о показе
+GravitySDK.instance.sendContentEngagement(
+    engagement: ContentImpressionEngagement(content: content, campaign: campaign)
+)
+```
+
+`rawVariables` — **полный** объект `variables`, включая типизированные ключи; типизированные поля и встроенный рендеринг работают как раньше. Набор ключей определяется настройками кампании, SDK их не валидирует.
 
 ## Отображение контента
 
