@@ -4,6 +4,8 @@
 
 * Add `getContentBySelectorWithDetails` and `getContentByCampaignIdWithDetails`: the model plus the raw JSON of the same response
 * Add `CampaignContent.rawVariables` and key access on `Variables` for keys with no typed counterpart
+* Add `customProps` and `eventTime` to all trigger events; `CustomEvent` also gets `cuid`, `cuidType` and `cart`
+* Events without `eventTime` are sent with the time `triggerEvent` was called
 
 ## 1.1.0
 

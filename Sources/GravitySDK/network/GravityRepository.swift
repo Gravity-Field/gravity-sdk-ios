@@ -75,6 +75,7 @@ internal class GravityRepository {
 
     func event(
         events: [TriggerEvent],
+        raisedAt: Date,
         pageContext: PageContext,
         options: Options,
         customerUser: User?
@@ -83,7 +84,7 @@ internal class GravityRepository {
             let requestBody = EventRequest(
                 sec: GravitySDK.instance.section,
                 device: deviceUtils.getDevice(),
-                data: events,
+                data: events.map { EventPayload(event: $0, raisedAt: raisedAt) },
                 user: userForRequest(customerUser),
                 ctx: mixPageContextAttributes(pageContext),
                 options: options
@@ -504,7 +505,7 @@ internal class GravityRepository {
     private struct EventRequest: Encodable {
         let sec: String
         let device: Device
-        let data: [TriggerEvent]
+        let data: [EventPayload]
         let user: User
         let ctx: PageContext
         let options: Options
