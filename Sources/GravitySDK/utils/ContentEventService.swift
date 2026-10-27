@@ -65,6 +65,46 @@ internal class ContentEventService {
         }
     }
 
+    /// One attempt per opening. Host/custom visibility notifications survive missing URLs
+    /// and persistence failure; a network WRIMP still requires successful persistence first.
+    func sendModalVisibleImpression(
+        _ content: CampaignContent, _ campaign: Campaign, sdk: GravitySDK,
+        openingId: UUID, scope: String
+    ) -> Bool {
+        // Appearance keeps the bounded EGO-248 fence even without a durable WRIMP.
+        sdk.presentationGate.visible(contentId: content.contentId)
+        func notifyAppearance() {
+            sdk.callbackTrackingEvent(ContentVisibleImpressionEvent(content: content, campaign: campaign))
+            if let custom = content.variables?.onVisibleImpression, custom.action != .visibleImpression {
+                trackEngagement(contentAction: custom, content: content)
+            }
+        }
+        guard let event = content.events?.first(where: { $0.type == .visibleImpression }),
+              !event.urls.isEmpty, let store = sdk.visibleImpressionDelivery.store else {
+            GravityLogger.e("ContentEvent", "Modal visible impression has no tracking URL", sendToBack: false)
+            notifyAppearance()
+            return false
+        }
+        var seen: Set<String> = []
+        let urls = event.urls.filter { seen.insert($0).inserted }
+        store.enqueue(.init(id: openingId, scope: scope,
+            campaignId: campaign.payload.first?.campaignId ?? content.contentId,
+            contentId: content.contentId, urls: urls)) { result in
+            switch result {
+            case .success:
+                // Complete the gate transition before the store wakes its current sender.
+                sdk.presentationGate.scoped {
+                    guard sdk.impressionScope == scope else { return }
+                    sdk.presentationGate.visible(contentId: content.contentId, durable: true)
+                }
+            case .failure:
+                GravityLogger.e("ContentEvent", "Unable to persist modal visible impression", sendToBack: false)
+            }
+            notifyAppearance()
+        }
+        return true
+    }
+
     func sendContentClosed(
         _ content: CampaignContent,
         _ campaign: Campaign,

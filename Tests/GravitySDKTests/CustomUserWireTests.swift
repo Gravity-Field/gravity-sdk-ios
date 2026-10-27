@@ -13,19 +13,20 @@ struct CustomUserWireTests {
     // Same key as Prefs
     private static let userIdKey = "gravity_user_id"
 
-    private func withServer(_ body: (RecordingServer) async throws -> Void) async throws {
+    private func withServer(_ body: (RecordingServer, TemporarySDKFixture) async throws -> Void) async throws {
         // The anonymous test persists a server uid; put back whatever was there
         let savedUserId = UserDefaults.standard.string(forKey: Self.userIdKey)
         defer { UserDefaults.standard.set(savedUserId, forKey: Self.userIdKey) }
+        let fixture = TemporarySDKFixture(apiKey: "custom-user-key", section: "custom-user-section")
         let server = try RecordingServer()
         try await server.start()
         defer { server.stop() }
-        GravitySDK.initialize(apiKey: "custom-user-key", section: "custom-user-section")
+        fixture.initialize()
         GravitySDK.instance.setOptions(options: nil, contentSettings: nil, proxyUrl: server.url)
         defer {
-            GravitySDK.initialize(apiKey: "custom-user-key", section: "custom-user-section")
+            fixture.initialize()
         }
-        try await body(server)
+        try await body(server, fixture)
     }
 
     private func user(_ request: RecordingServer.Request) -> [String: String] {
@@ -43,7 +44,7 @@ struct CustomUserWireTests {
     }
 
     @Test func allThreeChooseVariantsCarryTheCustomUser() async throws {
-        try await withServer { server in
+        try await withServer { server, _ in
             GravitySDK.instance.setUser(userId: "user-A", sessionId: "session-A")
 
             await getContentAllWays()
@@ -58,7 +59,7 @@ struct CustomUserWireTests {
     }
 
     @Test func switchingUserReplacesCustomAndSession() async throws {
-        try await withServer { server in
+        try await withServer { server, _ in
             GravitySDK.instance.setUser(userId: "user-A", sessionId: "session-A")
             await getContentAllWays()
             server.reset()
@@ -76,7 +77,7 @@ struct CustomUserWireTests {
     }
 
     @Test func chooseAnswerDoesNotOverwriteTheAnonymousSession() async throws {
-        try await withServer { server in
+        try await withServer { server, fixture in
             // Anonymous: the server assigns the session, the SDK keeps it
             server.reset(responseUser: ["uid": "anon-uid", "ses": "anon-ses"])
             _ = await GravitySDK.instance.getContentBySelector(selector: "anon-1", pageContext: pageContext)
@@ -104,7 +105,7 @@ struct CustomUserWireTests {
 
             // Back to anonymous: the earlier session is still the one in use
             server.reset()
-            GravitySDK.initialize(apiKey: "custom-user-key", section: "custom-user-section")
+            fixture.initialize()
             GravitySDK.instance.setOptions(options: nil, contentSettings: nil, proxyUrl: server.url)
             _ = await GravitySDK.instance.getContentBySelector(selector: "anon-3", pageContext: pageContext)
             let back = try #require(chooseRequests(server).last)
@@ -115,7 +116,7 @@ struct CustomUserWireTests {
     }
 
     @Test func trackViewSendsTheSameUserToVisitAndChoose() async throws {
-        try await withServer { server in
+        try await withServer { server, _ in
             server.reset(campaigns: [["campaignId": "101", "trigger": "view", "priority": 1]])
             GravitySDK.instance.setUser(userId: "user-A", sessionId: "session-A")
 
@@ -132,7 +133,7 @@ struct CustomUserWireTests {
     }
 
     @Test func triggerEventSendsTheSameUserToEventAndChoose() async throws {
-        try await withServer { server in
+        try await withServer { server, _ in
             server.reset(campaigns: [["campaignId": "101", "trigger": "event", "priority": 1]])
             GravitySDK.instance.setUser(userId: "user-A", sessionId: "session-A")
 

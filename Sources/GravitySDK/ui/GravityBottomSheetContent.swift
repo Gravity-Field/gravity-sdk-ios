@@ -4,6 +4,7 @@ import UIKit
 struct GravityBottomSheetContent: View {
     let content: CampaignContent
     let campaign: Campaign
+    let impressionSession: ModalImpressionSession
     let onBindClose: (@escaping () -> Void) -> Void
     let onClickCallback: (OnClickModel) -> Void
     let onDismiss: () -> Void
@@ -77,9 +78,12 @@ struct GravityBottomSheetContent: View {
                 isPresented: $showSheet,
                 cornerRadius: style?.cornerRadius ?? 0,
                 imagePrerollDelay: imagePrerollDelay,
+                onWillDismiss: {
+                    impressionSession.explicitClose()
+                },
                 onDismiss: onDismiss
             ) {
-                ContentVisibilityTracker(content: content, campaign: campaign) {
+                ModalContentVisibilityTracker(session: impressionSession) {
                     VStack(spacing: 0) {
                         ZStack {
                             VStack(alignment: horizontalAlignment) {
@@ -143,6 +147,7 @@ struct CustomSheet<Content: View>: View {
     @Binding var isPresented: Bool
     let cornerRadius: CGFloat
     let imagePrerollDelay: TimeInterval
+    let onWillDismiss: () -> Void
     let onDismiss: () -> Void
     @ViewBuilder let content: () -> Content
 
@@ -228,6 +233,7 @@ struct CustomSheet<Content: View>: View {
         )
 
         DispatchQueue.main.asyncAfter(deadline: .now() + imagePrerollDelay) {
+            guard isPresented, isVisible else { return }
             withAnimation(.spring()) {
                 slideOffset = 0
                 dimOpacity = 0.3
@@ -236,6 +242,7 @@ struct CustomSheet<Content: View>: View {
     }
 
     private func closeSheet() {
+        onWillDismiss()
         withAnimation(.spring()) {
             slideOffset = screenHeight
             dimOpacity = 0
