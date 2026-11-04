@@ -13,6 +13,13 @@
 - Preserve the configured product-container height while product slots are absent.
 - Drag a bottom sheet down from the top of its content without bouncing the nested scroll view.
 
+### User identity
+
+- Add `getUserId` and `setUserIdListener` to read and observe the server user ID.
+- Add `resetUser`, `restoreUserId` and `GravityUserIdError` for explicit identity changes and storage failures.
+- Discard previous-user content after identity changes; reload pending or empty inline content when the page context changes while retaining loads during navigation.
+- Preserve user ID listeners across SDK initialization; reset clears the in-memory identity even if storage removal fails.
+
 ## 1.2.0
 
 - Add `getContentBySelectorWithDetails` and `getContentByCampaignIdWithDetails`: the model plus the raw JSON of the same response

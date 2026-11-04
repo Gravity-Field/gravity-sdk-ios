@@ -111,8 +111,9 @@ private struct GravityInlineContentView: View {
     let presentingViewController: () -> UIViewController?
     let changeHeight: (CGFloat) -> Void
 
-    @State private var campaign: Campaign?
-    @State private var isLoading = true
+    @StateObject private var contentState = InlineContentState<Campaign>()
+    private var campaign: Campaign? { contentState.value }
+    private var isLoading: Bool { contentState.isLoading }
 
     private var style: Style? {
         guard let campaign = campaign,
@@ -198,39 +199,35 @@ private struct GravityInlineContentView: View {
                 Color.clear
             }
         }
-        .onReceive(pageContextProvider.$pageContext) { newContext in
+        .onReceive(contentState.$height) { height in
+            if let height { changeHeight(height) }
+        }
+        .background(InlinePlacementLifecycle(onMount: {
+            contentState.appear()
+            if let pageContext = pageContextProvider.pageContext {
+                loadContent(pageContext: pageContext)
+            }
+        }, onUnmount: { contentState.disappear() }))
+        .onReceive(pageContextProvider.$pageContext.dropFirst()) { newContext in
             if let pageContext = newContext {
+                contentState.pageContextChanged()
                 loadContent(pageContext: pageContext)
             }
         }
     }
 
     private func loadContent(pageContext: PageContext) {
-        guard campaign == nil else { return }
-        isLoading = true
+        guard let load = contentState.begin() else { return }
+        let sdk = GravitySDK.instance
         Task {
-            do {
-                let result = try await GravitySDK.instance.getContentBySelector(
-                    selector: selector,
-                    pageContext: pageContext
-                )
-                await MainActor.run {
-                    isLoading = false
-                    campaign = result?.data.first
-                    let payload = campaign?.payload.first
-                    let content = payload?.contents.firstByStep()
-                    if content == nil {
-                        changeHeight(0)
-                    } else if let height = content?.variables?.frameUI?.container
-                        .style?.size?.height
-                    {
-                        changeHeight(height)
-                    }
-                }
-            } catch {
-                await MainActor.run {
-                    changeHeight(0)
-                    isLoading = false
+            let result = await sdk.getContentBySelector(selector: selector, pageContext: pageContext)
+            await MainActor.run {
+                let campaign = result?.data.first
+                let content = campaign?.payload.first?.contents.firstByStep()
+                let backendHeight = content?.variables?.frameUI?.container.style?.size?.height
+                let height: CGFloat? = content == nil ? 0 : backendHeight.map { CGFloat($0) }
+                if contentState.complete(load, value: campaign, height: height) {
+                    loadContent(pageContext: pageContextProvider.pageContext ?? pageContext)
                 }
             }
         }

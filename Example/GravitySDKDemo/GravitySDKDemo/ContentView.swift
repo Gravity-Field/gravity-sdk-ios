@@ -13,6 +13,10 @@ struct ContentView: View {
         NavigationStack {
             VStack(spacing: 20) {
                 
+                NavigationLink("Server user identity") {
+                    UserIdentityExampleView()
+                }
+
                 Button("Track view homepage") {
                     GravitySDK.instance.trackView(
                         pageContext: PageContext(
@@ -187,4 +191,52 @@ private func abColor(_ hex: String) -> Color? {
         green: Double((value >> 8) & 0xFF) / 255,
         blue: Double(value & 0xFF) / 255
     )
+}
+
+/// Keep a server UID in your own account storage and restore it when needed.
+/// The process-wide listener remains installed when the SDK is initialized again.
+private struct UserIdentityExampleView: View {
+    @State private var currentUid: String?
+    @State private var uidToRestore = ""
+    @State private var status = ""
+
+    var body: some View {
+        Form {
+            Section("Server identity") {
+                Text(currentUid ?? "No server UID yet")
+                Button("Read server UID") {
+                    Task { currentUid = await GravitySDK.instance.getUserId() }
+                }
+                TextField("Saved server UID", text: $uidToRestore)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                Button("Restore server UID") {
+                    Task {
+                        do {
+                            try await GravitySDK.instance.restoreUserId(uidToRestore)
+                            currentUid = await GravitySDK.instance.getUserId()
+                            status = "Restored; the next request opens a session."
+                        } catch { status = "Restore failed: \(error)" }
+                    }
+                }
+                Button("Reset user") {
+                    Task {
+                        do {
+                            try await GravitySDK.instance.resetUser()
+                            currentUid = await GravitySDK.instance.getUserId()
+                            status = "Reset; the next request creates an anonymous user."
+                        } catch { status = "Reset failed: \(error)" }
+                    }
+                }
+                Text(status)
+            }
+        }
+        .navigationTitle("User identity")
+        .task {
+            // One listener per process; replace it here when opening this demo.
+            GravitySDK.instance.setUserIdListener { uid in currentUid = uid }
+            currentUid = await GravitySDK.instance.getUserId()
+        }
+        .onDisappear { GravitySDK.instance.setUserIdListener(nil) }
+    }
 }

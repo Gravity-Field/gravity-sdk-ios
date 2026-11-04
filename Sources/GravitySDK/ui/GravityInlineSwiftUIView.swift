@@ -5,6 +5,10 @@ private final class PresentingViewControllerHolder {
     weak var viewController: UIViewController?
 }
 
+private final class InlinePageContextHolder {
+    var latest: PageContext?
+}
+
 public struct GravityInlineSwiftUIView: View {
     let selector: String
     let pageContext: PageContext
@@ -26,9 +30,11 @@ public struct GravityInlineSwiftUIView: View {
         self.loader = AnyView(loader())
     }
 
-    @State private var campaign: Campaign?
-    @State private var contentHeight: CGFloat?
-    @State private var isLoading = true
+    @StateObject private var contentState = InlineContentState<Campaign>()
+    @State private var pageContextHolder = InlinePageContextHolder()
+    private var campaign: Campaign? { contentState.value }
+    private var contentHeight: CGFloat? { contentState.height }
+    private var isLoading: Bool { contentState.isLoading }
     @State private var presentingViewControllerHolder = PresentingViewControllerHolder()
 
     private var style: Style? {
@@ -120,9 +126,17 @@ public struct GravityInlineSwiftUIView: View {
         .applyIf(contentHeight != nil) {
             $0.forceFrame(height: contentHeight!, alignment: verticalAlignment)
         }
-        .onAppear(perform: loadContent)
+        .background(InlinePlacementLifecycle(onMount: {
+            contentState.appear()
+            loadContent()
+        }, onUnmount: { contentState.disappear() }))
+        .onChange(of: pageContext) { newContext in
+            pageContextHolder.latest = newContext
+            contentState.pageContextChanged()
+            loadContent()
+        }
         .onChange(of: selector) { _ in
-            campaign = nil
+            contentState.clear()
             loadContent()
         }
         .background(
@@ -133,31 +147,17 @@ public struct GravityInlineSwiftUIView: View {
     }
 
     private func loadContent() {
-        guard campaign == nil else { return }
-        isLoading = true
+        guard let load = contentState.begin() else { return }
+        let sdk = GravitySDK.instance
         Task {
-            do {
-                let result = try await GravitySDK.instance.getContentBySelector(
-                    selector: selector,
-                    pageContext: pageContext
-                )
-                await MainActor.run {
-                    isLoading = false
-                    campaign = result?.data.first
-                    let payload = campaign?.payload.first
-                    let content = payload?.contents.firstByStep()
-                    if content == nil {
-                        contentHeight = 0.0
-                    } else if let height = content?.variables?.frameUI?.container
-                        .style?.size?.height
-                    {
-                        contentHeight = height
-                    }
-                }
-            } catch {
-                await MainActor.run {
-                    contentHeight = 0.0
-                    isLoading = false
+            let result = await sdk.getContentBySelector(selector: selector, pageContext: pageContextHolder.latest ?? pageContext)
+            await MainActor.run {
+                let campaign = result?.data.first
+                let content = campaign?.payload.first?.contents.firstByStep()
+                let backendHeight = content?.variables?.frameUI?.container.style?.size?.height
+                let height: CGFloat? = content == nil ? 0 : backendHeight.map { CGFloat($0) }
+                if contentState.complete(load, value: campaign, height: height) {
+                    loadContent()
                 }
             }
         }

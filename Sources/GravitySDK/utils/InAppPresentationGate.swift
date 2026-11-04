@@ -43,10 +43,10 @@ internal final class InAppPresentationGate {
         self.now = now
     }
 
-    func scoped<T>(_ body: () -> T) -> T {
+    func scoped<T>(_ body: () throws -> T) rethrows -> T {
         lock.lock()
         defer { lock.unlock() }
-        return body()
+        return try body()
     }
 
     func beginRequest(location: String, newScreen: Bool) -> Request {

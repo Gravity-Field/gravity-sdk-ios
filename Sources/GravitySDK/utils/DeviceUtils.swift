@@ -2,13 +2,16 @@ import UIKit
 
 final class DeviceUtils {
     static let shared = DeviceUtils()
+    private static let deviceIdLock = NSLock()
 
-    private init() {
+    internal init(prefs: Prefs = .shared) {
+        self.prefs = prefs
         userAgent = getUserAgent()
         contextAttributes = getContextAttributes()
     }
 
     private var userAgent: String = ""
+    private let prefs: Prefs
     private(set) var contextAttributes: [String: String] = [:]
 
     func getPlatformVersion() -> String {
@@ -58,11 +61,15 @@ final class DeviceUtils {
     }
 
     private func getDeviceId() -> String {
-        if let deviceId = Prefs.shared.getDeviceId() {
+        // Keep the full read/create/write atomic, without holding this lock
+        // while accessing GravitySDK, session state or presentation state.
+        Self.deviceIdLock.lock()
+        defer { Self.deviceIdLock.unlock() }
+        if let deviceId = prefs.getDeviceId() {
             return deviceId
         } else {
             let deviceId = UUID().uuidString
-            Prefs.shared.setDeviceId(deviceId)
+            prefs.setDeviceId(deviceId)
             return deviceId
         }
     }

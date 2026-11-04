@@ -24,17 +24,15 @@ internal class GravityRepository {
         return decoder
     }()
 
-    private let prefs = Prefs.shared
     private let deviceUtils = DeviceUtils.shared
 
-    private var userIdCache: String?
-    private var sessionIdCache: String?
+    internal let sessionManager = SessionManager(storage: Prefs.shared)
 
     private var baseUrl: String {
         return GravitySDK.instance.proxyUrl ?? BASE_URL
     }
 
-    private lazy var urlSession: URLSession = {
+    private let urlSession: URLSession = {
         let configuration = URLSessionConfiguration.default
         configuration.timeoutIntervalForRequest = 5.0
         configuration.timeoutIntervalForResource = 5.0
@@ -44,14 +42,20 @@ internal class GravityRepository {
     func visit(
         pageContext: PageContext,
         options: Options,
-        customerUser: User?
+        customerUser: User?,
+        identityGeneration: UInt64? = nil,
+        raisedIdentity: SessionManager.Snapshot? = nil
     ) async -> CampaignIdsResponse? {
         do {
+            let raised = raisedIdentity ?? sessionManager.snapshot(customUser: customerUser, generation: identityGeneration)
+            let identityRequest = try await sessionManager.beginRequest(
+                customUser: customerUser, generation: raised.generation, raisedIdentity: raised)
+            defer { sessionManager.finish(identityRequest) }
             let requestBody = VisitRequest(
                 sec: GravitySDK.instance.section,
                 device: deviceUtils.getDevice(),
                 type: "screenview",
-                user: userForRequest(customerUser),
+                user: identityRequest.user,
                 ctx: mixPageContextAttributes(pageContext),
                 options: options
             )
@@ -62,11 +66,11 @@ internal class GravityRepository {
                 body: requestBody
             )
 
-            saveUserIfNeeded(
-                customerUser: customerUser,
-                contentResponseUser: response.user
-            )
+            guard saveUserIfNeeded(request: identityRequest, contentResponseUser: response.user) else { return nil }
+            try Task.checkCancellation()
             return response
+        } catch is CancellationError {
+            return nil
         } catch {
             GravityLogger.e(Self.TAG, "visit failed: \(error)")
             return nil
@@ -78,14 +82,20 @@ internal class GravityRepository {
         raisedAt: Date,
         pageContext: PageContext,
         options: Options,
-        customerUser: User?
+        customerUser: User?,
+        identityGeneration: UInt64? = nil,
+        raisedIdentity: SessionManager.Snapshot? = nil
     ) async -> CampaignIdsResponse? {
         do {
+            let raised = raisedIdentity ?? sessionManager.snapshot(customUser: customerUser, generation: identityGeneration)
+            let identityRequest = try await sessionManager.beginRequest(
+                customUser: customerUser, generation: raised.generation, raisedIdentity: raised)
+            defer { sessionManager.finish(identityRequest) }
             let requestBody = EventRequest(
                 sec: GravitySDK.instance.section,
                 device: deviceUtils.getDevice(),
                 data: events.map { EventPayload(event: $0, raisedAt: raisedAt) },
-                user: userForRequest(customerUser),
+                user: identityRequest.user,
                 ctx: mixPageContextAttributes(pageContext),
                 options: options
             )
@@ -96,11 +106,11 @@ internal class GravityRepository {
                 body: requestBody
             )
 
-            saveUserIfNeeded(
-                customerUser: customerUser,
-                contentResponseUser: response.user
-            )
+            guard saveUserIfNeeded(request: identityRequest, contentResponseUser: response.user) else { return nil }
+            try Task.checkCancellation()
             return response
+        } catch is CancellationError {
+            return nil
         } catch {
             GravityLogger.e(Self.TAG, "event failed: \(error)")
             return nil
@@ -112,9 +122,13 @@ internal class GravityRepository {
         options: Options,
         contentSettings: ContentSettings,
         customerUser: User? = nil,
-        pageContext: PageContext
+        pageContext: PageContext,
+        identityGeneration: UInt64? = nil
     ) async -> GravityDataResponse<ContentResponse>? {
         do {
+            let identityRequest = try await sessionManager.beginRequest(
+                customUser: customerUser, generation: identityGeneration ?? sessionManager.generation)
+            defer { sessionManager.finish(identityRequest) }
             let requestBody = ContentRequest(
                 sec: GravitySDK.instance.section,
                 device: deviceUtils.getDevice(),
@@ -124,7 +138,7 @@ internal class GravityRepository {
                         options: contentSettings
                     )
                 ],
-                user: userForRequest(customerUser),
+                user: identityRequest.user,
                 ctx: mixPageContextAttributes(pageContext),
                 options: options
             )
@@ -136,11 +150,11 @@ internal class GravityRepository {
             )
             let response = try parseContentResponse(data)
 
-            saveUserIfNeeded(
-                customerUser: customerUser,
-                contentResponseUser: response.data.user
-            )
+            guard saveUserIfNeeded(request: identityRequest, contentResponseUser: response.data.user) else { return nil }
+            try Task.checkCancellation()
             return response
+        } catch is CancellationError {
+            return nil
         } catch {
             GravityLogger.e(Self.TAG, "chooseByCampaignIdWithDetails failed: \(error)")
             return nil
@@ -152,9 +166,13 @@ internal class GravityRepository {
         options: Options,
         contentSettings: ContentSettings,
         customerUser: User? = nil,
-        pageContext: PageContext
+        pageContext: PageContext,
+        identityGeneration: UInt64? = nil
     ) async -> GravityDataResponse<ContentResponse>? {
         do {
+            let identityRequest = try await sessionManager.beginRequest(
+                customUser: customerUser, generation: identityGeneration ?? sessionManager.generation)
+            defer { sessionManager.finish(identityRequest) }
             let requestBody = ContentRequest(
                 sec: GravitySDK.instance.section,
                 device: deviceUtils.getDevice(),
@@ -164,7 +182,7 @@ internal class GravityRepository {
                         options: contentSettings
                     )
                 ],
-                user: userForRequest(customerUser),
+                user: identityRequest.user,
                 ctx: mixPageContextAttributes(pageContext),
                 options: options
             )
@@ -176,11 +194,11 @@ internal class GravityRepository {
             )
             let response = try parseContentResponse(data)
 
-            saveUserIfNeeded(
-                customerUser: customerUser,
-                contentResponseUser: response.data.user
-            )
+            guard saveUserIfNeeded(request: identityRequest, contentResponseUser: response.data.user) else { return nil }
+            try Task.checkCancellation()
             return response
+        } catch is CancellationError {
+            return nil
         } catch {
             GravityLogger.e(Self.TAG, "chooseBySelectorWithDetails failed: \(error)")
             return nil
@@ -192,9 +210,13 @@ internal class GravityRepository {
         options: Options,
         contentSettings: ContentSettings,
         customerUser: User? = nil,
-        pageContext: PageContext
+        pageContext: PageContext,
+        identityGeneration: UInt64? = nil
     ) async -> ContentResponse? {
         do {
+            let identityRequest = try await sessionManager.beginRequest(
+                customUser: customerUser, generation: identityGeneration ?? sessionManager.generation)
+            defer { sessionManager.finish(identityRequest) }
             let requestBody = ContentRequest(
                 sec: GravitySDK.instance.section,
                 device: deviceUtils.getDevice(),
@@ -204,7 +226,7 @@ internal class GravityRepository {
                         options: contentSettings
                     )
                 ],
-                user: userForRequest(customerUser),
+                user: identityRequest.user,
                 ctx: mixPageContextAttributes(pageContext),
                 options: options
             )
@@ -215,11 +237,11 @@ internal class GravityRepository {
                 body: requestBody
             )
 
-            saveUserIfNeeded(
-                customerUser: customerUser,
-                contentResponseUser: response.user
-            )
+            guard saveUserIfNeeded(request: identityRequest, contentResponseUser: response.user) else { return nil }
+            try Task.checkCancellation()
             return response
+        } catch is CancellationError {
+            return nil
         } catch {
             GravityLogger.e(Self.TAG, "chooseByGroup failed: \(error)")
             return nil
@@ -252,8 +274,9 @@ internal class GravityRepository {
             uid = customerUser.custom ?? ""
             ses = customerUser.ses ?? ""
         } else {
-            uid = userIdCache ?? ""
-            ses = sessionIdCache ?? ""
+            let cached = sessionManager.cachedUser(customUser: nil)
+            uid = cached.uid ?? ""
+            ses = cached.ses ?? ""
         }
         let sec = GravitySDK.instance.section
 
@@ -280,19 +303,7 @@ internal class GravityRepository {
     }
 
     func userForRequest(_ customerUser: User?) -> User {
-        if let customerUser = customerUser {
-            return customerUser
-        } else if let userIdCache = userIdCache,
-            let sessionIdCache = sessionIdCache
-        {
-            return User(uid: userIdCache, ses: sessionIdCache)
-        } else if userIdCache == nil, let sessionIdCache = sessionIdCache {
-            let userId = prefs.getUserId()
-            return User(uid: userId, ses: sessionIdCache)
-        } else {
-            let userId = prefs.getUserId()
-            return User(uid: userId, ses: nil)
-        }
+        sessionManager.cachedUser(customUser: customerUser)
     }
 
     private func mixPageContextAttributes(_ pageContext: PageContext)
@@ -314,23 +325,12 @@ internal class GravityRepository {
         )
     }
 
-    private func saveUserIfNeeded(
-        customerUser: User?,
-        contentResponseUser: User?
-    ) {
-        guard customerUser == nil else { return }
-
-        let uid = contentResponseUser?.uid
-        let ses = contentResponseUser?.ses
-
-        if let uid = uid {
-            Prefs.shared.setUserId(uid)
-            userIdCache = uid
+    private func saveUserIfNeeded(request: SessionManager.Request, contentResponseUser: User?) -> Bool {
+        do { try sessionManager.accept(contentResponseUser, for: request) }
+        catch {
+            GravityLogger.e(Self.TAG, "Server UID is available in memory but could not be stored: \(error)", sendToBack: false)
         }
-
-        if let ses = ses {
-            sessionIdCache = ses
-        }
+        return sessionManager.isCurrent(request.generation)
     }
 
     private func performRequest<T: Decodable>(

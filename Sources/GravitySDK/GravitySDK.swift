@@ -136,7 +136,10 @@ public class GravitySDK {
     internal static func initialize(_ next: GravitySDK, logLevel: LogLevel = .error) {
         GravityLogger.configure(logLevel)
         let previous = _instance
-        previous?.presentationGate.reset()
+        previous?.presentationGate.scoped {
+            previous?.presentationGate.reset()
+            previous?.repository.sessionManager.invalidate()
+        }
         _instance = next
         let predecessor = deliveryTransition
         deliveryTransition = Task {
@@ -179,19 +182,31 @@ public class GravitySDK {
     internal var user: User? { presentationGate.scoped { _user } }
 
     private func automaticRequest(_ pageContext: PageContext, newScreen: Bool)
-        -> (InAppPresentationGate.Request, User?, UInt64) {
+        -> (InAppPresentationGate.Request, User?, UInt64, SessionManager.Snapshot) {
         presentationGate.scoped {
             if newScreen { presentationRevision.invalidate() }
             return (presentationGate.beginRequest(location: pageContext.location, newScreen: newScreen),
-                    _user, presentationRevision.current)
+                    _user, presentationRevision.current, repository.sessionManager.snapshot(customUser: _user))
         }
     }
     private var options = Options()
     private var contentSettings = ContentSettings()
     internal var logListener: GravityLogListener?
     internal var proxyUrl: String?
-    internal var notificationPermissionStatus = NotificationPermissionStatus
-        .unknown
+    private let notificationPermissionLock = NSLock()
+    private var _notificationPermissionStatus = NotificationPermissionStatus.unknown
+    internal var notificationPermissionStatus: NotificationPermissionStatus {
+        get {
+            notificationPermissionLock.lock()
+            defer { notificationPermissionLock.unlock() }
+            return _notificationPermissionStatus
+        }
+        set {
+            notificationPermissionLock.lock()
+            defer { notificationPermissionLock.unlock() }
+            _notificationPermissionStatus = newValue
+        }
+    }
 
     private let presentationLock = NSLock()
     private var _isPresentationLocked = false
@@ -232,9 +247,63 @@ public class GravitySDK {
             if _user?.custom != userId || _user?.ses != sessionId {
                 presentationGate.reset()
                 presentationRevision.invalidate()
+                repository.sessionManager.invalidate()
             }
             _user = User(custom: userId, ses: sessionId)
         }
+    }
+
+    /// The server UID of the anonymous user, independent of `setUser` custom IDs.
+    /// Waits for an anonymous session request already in flight; never starts one.
+    /// Available before initialization. Reading a stored UID does not notify the listener.
+    /// Returns nil if the calling task is cancelled.
+    public func getUserId() async -> String? {
+        await repository.sessionManager.getUserId()
+    }
+
+    /// Observes server UID changes on the main queue, including restore and reset
+    /// (`nil`). Repeated server echoes are silent. Pass `nil` to unsubscribe.
+    /// Registering does not replay the current UID; use `getUserId` to read it.
+    public func setUserIdListener(_ listener: ((String?) -> Void)?) {
+        repository.sessionManager.setListener(listener)
+    }
+
+    /// Clears the anonymous session, custom user and stored UID. The next request
+    /// opens an anonymous session. Throws if storage refuses removal. The session
+    /// and custom user remain cleared; the getter returns nil even if storage
+    /// still contains the previous UID. Reset of a known UID still notifies the listener with nil.
+    /// Pending WRIMP delivery is retained. Available before initialization.
+    public func resetUser() async throws {
+        try presentationGate.scoped {
+            _user = nil
+            presentationGate.reset()
+            presentationRevision.invalidate()
+            try repository.sessionManager.resetUser()
+        }
+    }
+
+    /// Stores a previously obtained server UID, clears the session and custom
+    /// user, and uses that UID on the next request. Surrounding whitespace is
+    /// trimmed before storing. Empty/whitespace-only UIDs throw `invalidUserId`
+    /// without changing identity. Storage errors are thrown after
+    /// clearing the session/custom user; the previous UID remains in use and
+    /// the volatile UserDefaults value is rolled back on a failed write.
+    /// Pending WRIMP delivery is retained. Available before initialization.
+    public func restoreUserId(_ uid: String) async throws {
+        let restored = uid.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !restored.isEmpty else {
+            throw GravityUserIdError.invalidUserId
+        }
+        try presentationGate.scoped {
+            _user = nil
+            presentationGate.reset()
+            presentationRevision.invalidate()
+            try repository.sessionManager.restoreUserId(restored)
+        }
+    }
+
+    private func identitySnapshot() -> (User?, UInt64) {
+        presentationGate.scoped { (_user, repository.sessionManager.generation) }
     }
 
     public func setNotificationPermissionStatus(
@@ -292,16 +361,26 @@ public class GravitySDK {
         pageContext: PageContext,
         viewController: UIViewController? = nil
     ) {
-        guard checkInitialized() else { return }
+        trackViewTask(pageContext: pageContext, viewController: viewController)
+    }
 
-        let (request, requestUser, revision) = automaticRequest(pageContext, newScreen: true)
-        Task {
+    @discardableResult
+    internal func trackViewTask(
+        pageContext: PageContext,
+        viewController: UIViewController? = nil
+    ) -> Task<Void, Never>? {
+        guard checkInitialized() else { return nil }
+
+        let (request, requestUser, revision, raisedIdentity) = automaticRequest(pageContext, newScreen: true)
+        return Task {
             do {
                 guard
                     let campaignIdsResponse = await repository.visit(
                         pageContext: pageContext,
                         options: options,
-                        customerUser: requestUser
+                        customerUser: requestUser,
+                        identityGeneration: raisedIdentity.generation,
+                        raisedIdentity: raisedIdentity
                     )
                 else { return }
                 try await handleCampaignIdsResponse(
@@ -310,7 +389,8 @@ public class GravitySDK {
                     viewController,
                     request: request,
                     requestUser: requestUser,
-                    revision: revision
+                    revision: revision,
+                    identityGeneration: raisedIdentity.generation
                 )
             } catch {
                 GravityLogger.e(Self.TAG, "trackView error:  \(error)")
@@ -323,12 +403,21 @@ public class GravitySDK {
         pageContext: PageContext,
         viewController: UIViewController? = nil
     ) {
-        guard checkInitialized() else { return }
+        triggerEventTask(events: events, pageContext: pageContext, viewController: viewController)
+    }
+
+    @discardableResult
+    internal func triggerEventTask(
+        events: [TriggerEvent],
+        pageContext: PageContext,
+        viewController: UIViewController? = nil
+    ) -> Task<Void, Never>? {
+        guard checkInitialized() else { return nil }
         // The event happened now; events without their own eventTime are sent with it
         let raisedAt = Date()
 
-        let (request, requestUser, revision) = automaticRequest(pageContext, newScreen: false)
-        Task {
+        let (request, requestUser, revision, raisedIdentity) = automaticRequest(pageContext, newScreen: false)
+        return Task {
             do {
                 guard
                     let campaignIdsResponse = await repository.event(
@@ -336,7 +425,9 @@ public class GravitySDK {
                         raisedAt: raisedAt,
                         pageContext: pageContext,
                         options: options,
-                        customerUser: requestUser
+                        customerUser: requestUser,
+                        identityGeneration: raisedIdentity.generation,
+                        raisedIdentity: raisedIdentity
                     )
                 else { return }
                 try await handleCampaignIdsResponse(
@@ -345,7 +436,8 @@ public class GravitySDK {
                     viewController,
                     request: request,
                     requestUser: requestUser,
-                    revision: revision
+                    revision: revision,
+                    identityGeneration: raisedIdentity.generation
                 )
             } catch {
                 GravityLogger.e(Self.TAG, "triggerEvent error:  \(error)")
@@ -368,17 +460,21 @@ public class GravitySDK {
     ) async -> GravityDataResponse<ContentResponse>? {
         guard checkInitialized() else { return nil }
 
+        let (requestUser, identityGeneration) = identitySnapshot()
         guard
             let response = await repository.chooseBySelectorWithDetails(
                 selector: selector,
                 options: options,
                 contentSettings: contentSettings,
-                customerUser: user,
-                pageContext: pageContext
+                customerUser: requestUser,
+                pageContext: pageContext,
+                identityGeneration: identityGeneration
             )
         else { return nil }
 
+        guard repository.sessionManager.isCurrent(identityGeneration) else { return nil }
         await sendContentLoaded(response.data)
+        guard repository.sessionManager.isCurrent(identityGeneration) else { return nil }
         return response
     }
 
@@ -388,18 +484,21 @@ public class GravitySDK {
     ) async -> ContentResponse? {
         guard checkInitialized() else { return nil }
 
+        let (requestUser, identityGeneration) = identitySnapshot()
         guard
             let response = await repository.chooseByGroup(
                 group: groupSelector,
                 options: options,
                 contentSettings: contentSettings,
-                customerUser: user,
-                pageContext: pageContext
+                customerUser: requestUser,
+                pageContext: pageContext,
+                identityGeneration: identityGeneration
             )
         else { return nil }
 
+        guard repository.sessionManager.isCurrent(identityGeneration) else { return nil }
         await sendContentLoaded(response)
-
+        guard repository.sessionManager.isCurrent(identityGeneration) else { return nil }
         return response
     }
 
@@ -409,7 +508,8 @@ public class GravitySDK {
         _ viewController: UIViewController? = nil,
         request: InAppPresentationGate.Request,
         requestUser: User?,
-        revision: UInt64
+        revision: UInt64,
+        identityGeneration: UInt64
     ) async throws {
         guard presentationGate.isCurrent(request), !response.campaigns.isEmpty else { return }
         if let store = visibleImpressionDelivery.store, !(await store.waitUntilLoaded()) {
@@ -442,7 +542,8 @@ public class GravitySDK {
                 let result = await getContentByCampaignId(
                     campaignId.campaignId,
                     pageContext,
-                    requestUser: requestUser
+                    requestUser: requestUser,
+                    identityGeneration: identityGeneration
                 )
             else { continue }
 
@@ -638,21 +739,26 @@ public class GravitySDK {
         _ campaignId: String,
         _ pageContext: PageContext
     ) async -> GravityDataResponse<ContentResponse>? {
-        await getContentByCampaignIdWithDetails(campaignId, pageContext, requestUser: user)
+        let (requestUser, identityGeneration) = identitySnapshot()
+        return await getContentByCampaignIdWithDetails(campaignId, pageContext,
+            requestUser: requestUser, identityGeneration: identityGeneration)
     }
 
     private func getContentByCampaignId(
         _ campaignId: String,
         _ pageContext: PageContext,
-        requestUser: User?
+        requestUser: User?,
+        identityGeneration: UInt64
     ) async -> ContentResponse? {
-        await getContentByCampaignIdWithDetails(campaignId, pageContext, requestUser: requestUser)?.data
+        await getContentByCampaignIdWithDetails(campaignId, pageContext,
+            requestUser: requestUser, identityGeneration: identityGeneration)?.data
     }
 
     private func getContentByCampaignIdWithDetails(
         _ campaignId: String,
         _ pageContext: PageContext,
-        requestUser: User?
+        requestUser: User?,
+        identityGeneration: UInt64
     ) async -> GravityDataResponse<ContentResponse>? {
         guard checkInitialized() else { return nil }
 
@@ -662,11 +768,14 @@ public class GravitySDK {
                 options: options,
                 contentSettings: contentSettings,
                 customerUser: requestUser,
-                pageContext: pageContext
+                pageContext: pageContext,
+                identityGeneration: identityGeneration
             )
         else { return nil }
 
+        guard repository.sessionManager.isCurrent(identityGeneration) else { return nil }
         await sendContentLoaded(response.data)
+        guard repository.sessionManager.isCurrent(identityGeneration) else { return nil }
         return response
     }
 

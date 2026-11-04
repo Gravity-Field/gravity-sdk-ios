@@ -113,8 +113,9 @@ private struct GravityInlineListContentView: View {
     let presentingViewController: () -> UIViewController?
     let changeHeight: (CGFloat) -> Void
 
-    @State private var items: [InlineListViewItem]?
-    @State private var isLoading = true
+    @StateObject private var contentState = InlineContentState<[InlineListViewItem]>()
+    private var items: [InlineListViewItem]? { contentState.value }
+    private var isLoading: Bool { contentState.isLoading }
 
     var body: some View {
         Group {
@@ -134,54 +135,51 @@ private struct GravityInlineListContentView: View {
         .applyIf(cornerRadius > 0) {
             $0.clipShape(RoundedRectangle(cornerRadius: cornerRadius))
         }
-        .onReceive(pageContextProvider.$pageContext) { newContext in
+        .onReceive(contentState.$height) { height in
+            if let height { changeHeight(height) }
+        }
+        .background(InlinePlacementLifecycle(onMount: {
+            contentState.appear()
+            if let pageContext = pageContextProvider.pageContext {
+                loadContent(pageContext: pageContext)
+            }
+        }, onUnmount: { contentState.disappear() }))
+        .onReceive(pageContextProvider.$pageContext.dropFirst()) { newContext in
             if let pageContext = newContext {
+                contentState.pageContextChanged()
                 loadContent(pageContext: pageContext)
             }
         }
     }
 
     private func loadContent(pageContext: PageContext) {
-        guard items == nil else { return }
-        isLoading = true
+        guard let load = contentState.begin() else { return }
+        let sdk = GravitySDK.instance
         Task {
-            do {
-                let result = await GravitySDK.instance.getContentByGroupSelector(
-                    groupSelector: groupSelector,
-                    pageContext: pageContext
-                )
-                await MainActor.run {
-                    isLoading = false
-                    guard let result else {
-                        changeHeight(0)
-                        return
+            let result = await sdk.getContentByGroupSelector(groupSelector: groupSelector, pageContext: pageContext)
+            await MainActor.run {
+                guard let result else {
+                    if contentState.complete(load, value: nil, height: 0) {
+                        loadContent(pageContext: pageContextProvider.pageContext ?? pageContext)
                     }
-                    var contentItems: [InlineListViewItem] = []
-                    for campaign in result.data {
-                        guard let payload = campaign.payload.first,
-                              let content = payload.contents.firstByStepNullsFirst()
-                        else { continue }
-                        contentItems.append(
-                            InlineListViewItem(campaign: campaign, content: content)
-                        )
-                    }
-                    items = contentItems
-
-                    let maxHeight = contentItems
-                        .compactMap {
-                            $0.content.variables?.frameUI?.container.style?.size?.height
-                        }
-                        .max()
-                    changeHeight(maxHeight ?? 0)
+                    return
                 }
-            } catch {
-                await MainActor.run {
-                    isLoading = false
-                    changeHeight(0)
+                var contentItems: [InlineListViewItem] = []
+                for campaign in result.data {
+                    guard let payload = campaign.payload.first,
+                          let content = payload.contents.firstByStepNullsFirst() else { continue }
+                    contentItems.append(InlineListViewItem(campaign: campaign, content: content))
+                }
+                let maxHeight = contentItems.compactMap {
+                    $0.content.variables?.frameUI?.container.style?.size?.height
+                }.max()
+                if contentState.complete(load, value: contentItems.isEmpty ? nil : contentItems, height: CGFloat(maxHeight ?? 0)) {
+                    loadContent(pageContext: pageContextProvider.pageContext ?? pageContext)
                 }
             }
         }
     }
+
 }
 
 private struct ItemListView: View {

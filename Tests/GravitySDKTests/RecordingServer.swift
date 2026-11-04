@@ -13,6 +13,9 @@ final class RecordingServer: @unchecked Sendable {
     private let queue = DispatchQueue(label: "RecordingServer")
     private let listener: NWListener
     private var requests: [Request] = []
+    private var holdNext = false
+    private var heldStatusCode = 200
+    private var held: [(NWConnection, Data)] = []
     private var connections: [ObjectIdentifier: NWConnection] = [:]
 
     // Accessed only on `queue`
@@ -66,6 +69,22 @@ final class RecordingServer: @unchecked Sendable {
             self.campaigns = campaigns
             self.content = content
             self.responseUser = responseUser
+        }
+    }
+
+    /// Hold one fully constructed answer so tests can change identity before it arrives.
+    func holdNextResponse(statusCode: Int = 200) {
+        queue.sync {
+            holdNext = true
+            heldStatusCode = statusCode
+        }
+    }
+
+    func releaseHeldResponses() {
+        queue.sync {
+            let responses = held
+            held.removeAll()
+            for (connection, data) in responses { send(connection, data: data) }
         }
     }
 
@@ -137,14 +156,22 @@ final class RecordingServer: @unchecked Sendable {
             json["data"] = content
         }
         let body = (try? JSONSerialization.data(withJSONObject: json)) ?? Data()
+        let statusCode = holdNext ? heldStatusCode : 200
         var response = Data(
-            ("HTTP/1.1 200 OK\r\n"
+            ("HTTP/1.1 \(statusCode) \(HTTPURLResponse.localizedString(forStatusCode: statusCode))\r\n"
                 + "Content-Type: application/json\r\n"
                 + "Content-Length: \(body.count)\r\n"
                 + "Connection: close\r\n\r\n").utf8
         )
         response.append(body)
-        connection.send(content: response, completion: .contentProcessed { _ in
+        if holdNext {
+            holdNext = false
+            held.append((connection, response))
+        } else { send(connection, data: response) }
+    }
+
+    private func send(_ connection: NWConnection, data: Data) {
+        connection.send(content: data, completion: .contentProcessed { _ in
             connection.cancel()
         })
     }
