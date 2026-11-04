@@ -131,6 +131,10 @@ struct ContentView: View {
                     showInlineListDemo = true
                 }
 
+                NavigationLink("Render a triggered campaign myself") {
+                    HeadlessCampaignDemo()
+                }
+
                 Button("Review Prompt Test Console") {
                     showReviewPromptTestConsole = true
                 }
@@ -238,5 +242,89 @@ private struct UserIdentityExampleView: View {
             currentUid = await GravitySDK.instance.getUserId()
         }
         .onDisappear { GravitySDK.instance.setUserIdListener(nil) }
+    }
+}
+
+private struct HeadlessCampaignDemo: View {
+    @State private var response: GravityDataResponse<ContentResponse>?
+    @State private var status = "Fetch a campaign to apply its content to your own view."
+    @State private var reported = false
+    @State private var reportedVisible = false
+    @State private var isLoading = false
+
+    @MainActor private func fetch(event: Bool) async {
+        guard !isLoading else { return }
+        isLoading = true
+        defer { isLoading = false }
+        response = nil
+        reported = false
+        reportedVisible = false
+        let page = PageContext(type: .homepage, data: [], location: "homepage")
+        do {
+            if event {
+                response = try await GravitySDK.instance.triggerEventNoShow(
+                    events: [CustomEvent(type: "tap", name: "Headless demo")], pageContext: page
+                )
+            } else {
+                response = try await GravitySDK.instance.trackViewNoShow(pageContext: page)
+            }
+            status = response == nil ? "No content returned." : "Campaign fetched."
+        } catch is CancellationError {
+            status = "Cancelled."
+        } catch {
+            status = error.localizedDescription
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 20) {
+            Button("Track view and fetch without showing") {
+                Task { await fetch(event: false) }
+            }
+            .disabled(isLoading)
+            Button("Trigger event and fetch without showing") {
+                Task { await fetch(event: true) }
+            }
+            .disabled(isLoading)
+            Text(status)
+            if let response,
+               let campaign = response.data.data.first,
+               let content = campaign.payload.first?.contents.first(where: { $0.step == nil }) {
+                // The app owns this view. No Gravity renderer or presentation is invoked.
+                VStack {
+                    Text(content.rawVariables["title"]?.stringValue
+                         ?? content.variables?.elements?.first?.text ?? content.contentId)
+                        .font(.title2)
+                    Text("Content: \(content.contentId)")
+                        .font(.caption)
+                }
+                .padding()
+                .background(Color.gray.opacity(0.1))
+                .onAppear {
+                    guard !reported else { return }
+                    reported = true
+                    // Report only once the app's own view appears, never during fetch.
+                    GravitySDK.instance.sendContentEngagement(
+                        engagement: ContentImpressionEngagement(content: content, campaign: campaign)
+                    )
+                }
+                Button("Report confirmed visibility") {
+                    guard !reportedVisible else { return }
+                    reportedVisible = true
+                    // Call once when the host confirms its own visibility criteria are met.
+                    GravitySDK.instance.sendContentEngagement(
+                        engagement: ContentVisibleImpressionEngagement(content: content, campaign: campaign)
+                    )
+                }
+                .disabled(reportedVisible)
+                DisclosureGroup("Raw response JSON") {
+                    ScrollView {
+                        Text(String(describing: response.json)).font(.caption)
+                    }
+                }
+            }
+        }
+        .padding()
+        .navigationTitle("Own campaign rendering")
     }
 }

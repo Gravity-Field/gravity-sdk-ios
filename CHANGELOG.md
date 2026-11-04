@@ -20,6 +20,11 @@
 - Discard previous-user content after identity changes; reload pending or empty inline content when the page context changes while retaining loads during navigation.
 - Preserve user ID listeners across SDK initialization; reset clears the in-memory identity even if storage removal fails.
 
+### Headless campaign fetching
+
+- Add async `trackViewNoShow` and `triggerEventNoShow` to return campaign content and raw JSON without opening UI or sending client impression events; candidates are tried by descending priority.
+- Add `isFetchContentOnTrack` and `staleContentTimeout` to control NoShow fetching before or after initialization. Settings survive reinitialization, timeout updates affect in-flight requests, and host request options are passed unchanged. Each content candidate uses the current options and content settings.
+
 ## 1.2.0
 
 - Add `getContentBySelectorWithDetails` and `getContentByCampaignIdWithDetails`: the model plus the raw JSON of the same response

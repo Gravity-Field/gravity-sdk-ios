@@ -10,6 +10,21 @@ final class RecordingServer: @unchecked Sendable {
         let body: [String: Any]
     }
 
+    struct Response {
+        var json: [String: Any]
+        var status = 200
+        var delay: TimeInterval = 0
+        var rawBody: Data? = nil
+        var sendAfter: DispatchGroup? = nil
+        var disconnect = false
+    }
+
+    private var responseHandler: ((Request) -> Response)?
+
+    func setResponseHandler(_ handler: @escaping (Request) -> Response) {
+        queue.sync { responseHandler = handler }
+    }
+
     private let queue = DispatchQueue(label: "RecordingServer")
     private let listener: NWListener
     private var requests: [Request] = []
@@ -66,6 +81,7 @@ final class RecordingServer: @unchecked Sendable {
     func reset(campaigns: [[String: Any]] = [], content: [[String: Any]] = [], responseUser: [String: Any] = ["uid": "server-uid", "ses": "server-ses"]) {
         queue.sync {
             requests.removeAll()
+            responseHandler = nil
             self.campaigns = campaigns
             self.content = content
             self.responseUser = responseUser
@@ -123,7 +139,7 @@ final class RecordingServer: @unchecked Sendable {
             if let data { buffer.append(data) }
             if let request = Self.parse(buffer) {
                 self.requests.append(request)
-                self.respond(connection, path: request.path)
+                self.respond(connection, request: request)
             } else if isComplete || error != nil {
                 connection.cancel()
             } else {
@@ -148,26 +164,39 @@ final class RecordingServer: @unchecked Sendable {
         return Request(path: path, body: body)
     }
 
-    private func respond(_ connection: NWConnection, path: String) {
+    private func respond(_ connection: NWConnection, request: Request) {
+        let path = request.path
         var json: [String: Any] = ["user": responseUser]
         if path.hasSuffix("/visit") || path.hasSuffix("/event") {
             json["campaigns"] = campaigns
         } else {
             json["data"] = content
         }
-        let body = (try? JSONSerialization.data(withJSONObject: json)) ?? Data()
-        let statusCode = holdNext ? heldStatusCode : 200
+        let answer = responseHandler?(request) ?? Response(json: json)
+        if answer.disconnect {
+            connection.cancel()
+            return
+        }
+        let body = answer.rawBody ?? (try? JSONSerialization.data(withJSONObject: answer.json)) ?? Data()
+        let statusCode = holdNext ? heldStatusCode : answer.status
         var response = Data(
-            ("HTTP/1.1 \(statusCode) \(HTTPURLResponse.localizedString(forStatusCode: statusCode))\r\n"
+            ("HTTP/1.1 \(statusCode) Response\r\n"
                 + "Content-Type: application/json\r\n"
                 + "Content-Length: \(body.count)\r\n"
                 + "Connection: close\r\n\r\n").utf8
         )
         response.append(body)
+        let bytes = response
+        let send = {
+            self.queue.asyncAfter(deadline: .now() + answer.delay) {
+                self.send(connection, data: bytes)
+            }
+        }
         if holdNext {
             holdNext = false
             held.append((connection, response))
-        } else { send(connection, data: response) }
+        } else if let sendAfter = answer.sendAfter { sendAfter.notify(queue: queue, execute: send) }
+        else { send() }
     }
 
     private func send(_ connection: NWConnection, data: Data) {

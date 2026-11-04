@@ -189,6 +189,22 @@ public class GravitySDK {
                     _user, presentationRevision.current, repository.sessionManager.snapshot(customUser: _user))
         }
     }
+    // These process-wide settings also apply to the pre-initialize placeholder.
+    private static let trackingConfiguration = TrackingConfiguration()
+
+    /// Controls NoShow content fetching; tracking is always sent.
+    public var isFetchContentOnTrack: Bool {
+        get { Self.trackingConfiguration.fetchContent }
+        set { Self.trackingConfiguration.fetchContent = newValue }
+    }
+
+    /// Maximum NoShow request age in seconds; negative values become zero.
+    /// Settings survive initialize(), including values set before initialization.
+    public var staleContentTimeout: TimeInterval {
+        get { Self.trackingConfiguration.timeout }
+        set { Self.trackingConfiguration.timeout = max(0, newValue) }
+    }
+
     private var options = Options()
     private var contentSettings = ContentSettings()
     internal var logListener: GravityLogListener?
@@ -443,6 +459,99 @@ public class GravitySDK {
                 GravityLogger.e(Self.TAG, "triggerEvent error:  \(error)")
             }
         }
+    }
+
+    /// Tracks a screen and tries campaigns by descending priority until one has root content.
+    /// Failed content requests are logged and skipped. Only the returned response emits
+    /// ContentLoadEvent callbacks and configured onLoad tracking URLs, as getContent does.
+    /// No UI or impression/visible-impression events are sent automatically.
+    /// Returns nil if tracking fails, no candidate yields content, or the request becomes
+    /// stale or its identity changes; task cancellation throws CancellationError.
+    public func trackViewNoShow(
+        pageContext: PageContext
+    ) async throws -> GravityDataResponse<ContentResponse>? {
+        try await fetchCampaignWithoutPresentation(pageContext: pageContext, events: nil)
+    }
+
+    /// Sends events and resolves content with the same semantics as trackViewNoShow.
+    public func triggerEventNoShow(
+        events: [TriggerEvent],
+        pageContext: PageContext
+    ) async throws -> GravityDataResponse<ContentResponse>? {
+        try await fetchCampaignWithoutPresentation(pageContext: pageContext, events: events)
+    }
+
+    private struct HeadlessRequest {
+        let user: User?
+        let identity: SessionManager.Snapshot
+        let startedAt: TimeInterval
+        let options: Options
+    }
+
+    private func isHeadlessRequestCurrent(_ request: HeadlessRequest) -> Bool {
+        presentationGate.scoped {
+            Self._instance === self && repository.sessionManager.isCurrent(request.identity.generation)
+                && ProcessInfo.processInfo.systemUptime - request.startedAt <= staleContentTimeout
+        }
+    }
+
+    private func fetchCampaignWithoutPresentation(
+        pageContext: PageContext,
+        events: [TriggerEvent]?
+    ) async throws -> GravityDataResponse<ContentResponse>? {
+        try Task.checkCancellation()
+        guard checkInitialized(), Self._instance === self else { return nil }
+        let raisedAt = Date()
+        let request = presentationGate.scoped {
+            HeadlessRequest(
+                user: _user, identity: repository.sessionManager.snapshot(customUser: _user),
+                startedAt: ProcessInfo.processInfo.systemUptime,
+                options: options
+            )
+        }
+        let response: CampaignIdsResponse?
+        if let events {
+            response = await repository.event(events: events, raisedAt: raisedAt,
+                pageContext: pageContext, options: request.options, customerUser: request.user,
+                raisedIdentity: request.identity)
+        } else {
+            response = await repository.visit(pageContext: pageContext,
+                options: request.options, customerUser: request.user,
+                raisedIdentity: request.identity)
+        }
+        try Task.checkCancellation()
+        guard let response, isFetchContentOnTrack, isHeadlessRequestCurrent(request) else { return nil }
+
+        let campaigns = response.campaigns.enumerated().sorted { lhs, rhs in
+            let left = lhs.element.priority ?? 0
+            let right = rhs.element.priority ?? 0
+            return left == right ? lhs.offset < rhs.offset : left > right
+        }
+        for candidate in campaigns {
+            try Task.checkCancellation()
+            guard isFetchContentOnTrack, isHeadlessRequestCurrent(request) else { return nil }
+            let result = await getContentByCampaignIdWithDetails(
+                candidate.element.campaignId, pageContext,
+                requestUser: request.user, identityGeneration: request.identity.generation,
+                notifyContentLoaded: false
+            )
+            try Task.checkCancellation()
+            guard isHeadlessRequestCurrent(request), isFetchContentOnTrack else { return nil }
+            guard let result,
+                  result.data.data.first?.payload.first?.contents.contains(where: { $0.step == nil }) == true
+            else { continue }
+            // Acceptance is final before notifying the host, as in Flutter. Do not
+            // suspend or recheck the deadline after emitting load side effects.
+            for campaign in result.data.data {
+                for payload in campaign.payload {
+                    for content in payload.contents {
+                        contentEventService.sendContentLoaded(content, campaign)
+                    }
+                }
+            }
+            return result
+        }
+        return nil
     }
 
     public func getContentBySelector(
@@ -758,7 +867,8 @@ public class GravitySDK {
         _ campaignId: String,
         _ pageContext: PageContext,
         requestUser: User?,
-        identityGeneration: UInt64
+        identityGeneration: UInt64,
+        notifyContentLoaded: Bool = true
     ) async -> GravityDataResponse<ContentResponse>? {
         guard checkInitialized() else { return nil }
 
@@ -774,7 +884,7 @@ public class GravitySDK {
         else { return nil }
 
         guard repository.sessionManager.isCurrent(identityGeneration) else { return nil }
-        await sendContentLoaded(response.data)
+        if notifyContentLoaded { await sendContentLoaded(response.data) }
         guard repository.sessionManager.isCurrent(identityGeneration) else { return nil }
         return response
     }
