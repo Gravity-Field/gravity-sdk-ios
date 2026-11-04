@@ -37,29 +37,31 @@ internal class GravityLogger {
         _ prefix: String,
         _ message: String,
         _ error: Error? = nil,
-        sendToBack: Bool = true
+        sendToBack: Bool = true,
+        repository: GravityRepository? = nil
     ) {
         if LogLevel.error.rawValue >= logLevel.rawValue {
             let logMessage: String
             if let error = error {
-                logMessage = "[\(prefix)] \(message) - Error: \(error.localizedDescription)"
+                logMessage = "[\(prefix)] \(message) - Error: \(NetworkError.diagnosticText(error))"
             } else {
                 logMessage = "[\(prefix)] \(message)"
             }
+            let safeLogMessage = ReportSanitizer.sanitizeText(logMessage, limit: 1000)
             os_log(
                 "[GravitySDK] %{public}@",
                 log: .default,
                 type: .error,
-                logMessage
+                safeLogMessage
             )
-            GravitySDK.instance.logListener?(.error, logMessage)
+            GravitySDK.instance.logListener?(.error, safeLogMessage)
         }
 
         if sendToBack {
             Task {
-                await GravityRepository.instance.sendErrorMessage(
+                await (repository ?? GravityRepository.instance).sendErrorMessage(
                     message: "[\(prefix)] \(message)",
-                    stacktrace: error?.localizedDescription ?? ""
+                    stacktrace: error.map { NetworkError.diagnosticText($0) } ?? ""
                 )
             }
         }

@@ -11,7 +11,15 @@ internal class GravityRepository {
 
     private static let TAG = "Repository"
 
-    private init() {}
+    private init() {
+        urlSession = Self.makeURLSession()
+        errorReportLimiter = ErrorReportLimiter()
+    }
+
+    internal init(urlSession: URLSession, errorReportLimiter: ErrorReportLimiter = ErrorReportLimiter()) {
+        self.urlSession = urlSession
+        self.errorReportLimiter = errorReportLimiter
+    }
 
     private let jsonEncoder: JSONEncoder = {
         let encoder = JSONEncoder()
@@ -32,12 +40,15 @@ internal class GravityRepository {
         return GravitySDK.instance.proxyUrl ?? BASE_URL
     }
 
-    private let urlSession: URLSession = {
+    private let urlSession: URLSession
+    private let errorReportLimiter: ErrorReportLimiter
+
+    private static func makeURLSession() -> URLSession {
         let configuration = URLSessionConfiguration.default
         configuration.timeoutIntervalForRequest = 5.0
         configuration.timeoutIntervalForResource = 5.0
         return URLSession(configuration: configuration)
-    }()
+    }
 
     func visit(
         pageContext: PageContext,
@@ -72,6 +83,7 @@ internal class GravityRepository {
         } catch is CancellationError {
             return nil
         } catch {
+            if Task.isCancelled || (error as? URLError)?.code == .cancelled { return nil }
             GravityLogger.e(Self.TAG, "visit failed: \(error)")
             return nil
         }
@@ -112,6 +124,7 @@ internal class GravityRepository {
         } catch is CancellationError {
             return nil
         } catch {
+            if Task.isCancelled || (error as? URLError)?.code == .cancelled { return nil }
             GravityLogger.e(Self.TAG, "event failed: \(error)")
             return nil
         }
@@ -156,6 +169,7 @@ internal class GravityRepository {
         } catch is CancellationError {
             return nil
         } catch {
+            if Task.isCancelled || (error as? URLError)?.code == .cancelled { return nil }
             GravityLogger.e(Self.TAG, "chooseByCampaignIdWithDetails failed: \(error)")
             return nil
         }
@@ -200,6 +214,7 @@ internal class GravityRepository {
         } catch is CancellationError {
             return nil
         } catch {
+            if Task.isCancelled || (error as? URLError)?.code == .cancelled { return nil }
             GravityLogger.e(Self.TAG, "chooseBySelectorWithDetails failed: \(error)")
             return nil
         }
@@ -243,6 +258,7 @@ internal class GravityRepository {
         } catch is CancellationError {
             return nil
         } catch {
+            if Task.isCancelled || (error as? URLError)?.code == .cancelled { return nil }
             GravityLogger.e(Self.TAG, "chooseByGroup failed: \(error)")
             return nil
         }
@@ -267,17 +283,17 @@ internal class GravityRepository {
         message: String,
         stacktrace: String
     ) async {
+        guard !Task.isCancelled,
+              let permit = errorReportLimiter.begin(message: message, stacktrace: stacktrace) else { return }
+        defer { errorReportLimiter.complete(permit, delivered: false) }
         let customerUser = GravitySDK.instance.user
-        let uid: String
-        let ses: String
-        if let customerUser = customerUser {
-            uid = customerUser.custom ?? ""
-            ses = customerUser.ses ?? ""
-        } else {
-            let cached = sessionManager.cachedUser(customUser: nil)
-            uid = cached.uid ?? ""
-            ses = cached.ses ?? ""
-        }
+        let cached = sessionManager.cachedUser(customUser: nil)
+        // SessionManager owns the current device identity, including reset/restore.
+        // Never resurrect stale storage or substitute the host's custom user id.
+        let uid = [cached.uid].compactMap { $0 }.first { !$0.isEmpty }
+            ?? deviceUtils.getDeviceId()
+        let ses = [cached.ses, customerUser?.ses].compactMap { $0 }
+            .first { !$0.isEmpty } ?? "no-session"
         let sec = GravitySDK.instance.section
 
         let logMessage = LogMessage(
@@ -297,7 +313,9 @@ internal class GravityRepository {
                 throw NetworkError.invalidURL(urlString)
             }
             try await performRequest(url: url, method: "POST", body: logMessage, authorized: false)
+            errorReportLimiter.complete(permit, delivered: true)
         } catch {
+            errorReportLimiter.complete(permit, delivered: false)
             GravityLogger.e(Self.TAG, "sendErrorMessage failed: \(error)", sendToBack: false)
         }
     }
@@ -407,7 +425,12 @@ internal class GravityRepository {
 
         logHttpRequest(request: request)
 
-        let (data, response) = try await urlSession.data(for: request)
+        let data: Data
+        let response: URLResponse
+        do { (data, response) = try await urlSession.data(for: request) }
+        catch let error as URLError {
+            throw NetworkError.transportFailure(error, method: method, url: url.absoluteString)
+        }
 
         guard let httpResponse = response as? HTTPURLResponse else {
             throw NetworkError.invalidResponse
@@ -416,10 +439,17 @@ internal class GravityRepository {
         logHttpResponse(response: httpResponse, data: data, method: method)
 
         guard (200...299).contains(httpResponse.statusCode) else {
-            throw NetworkError.httpError(statusCode: httpResponse.statusCode)
+            throw NetworkError.httpError(statusCode: httpResponse.statusCode, method: method, url: url.absoluteString)
         }
         
         return (data, httpResponse)
+    }
+
+    private func safeDiagnosticHeader(key: String, value: String) -> String {
+        let name = key.lowercased()
+        if name == "authorization" { return "Bearer ***" }
+        if ["proxy-authorization", "cookie", "set-cookie", "x-api-key"].contains(name) { return "***" }
+        return ReportSanitizer.sanitizeText(value, limit: 1000)
     }
 
     private func logHttpRequest(request: URLRequest) {
@@ -427,7 +457,7 @@ internal class GravityRepository {
         let method = request.httpMethod
         let bodyData = request.httpBody
         
-        var logMessage = "REQUEST: \(url?.absoluteString ?? "nil")\n"
+        var logMessage = "REQUEST: \(ReportSanitizer.sanitizeUrls(url?.absoluteString ?? "nil"))\n"
         logMessage += "METHOD: \(method ?? "nil")\n"
 
         logMessage += "COMMON HEADERS\n"
@@ -435,7 +465,8 @@ internal class GravityRepository {
             let sortedKeys = headers.keys.sorted { $0.lowercased() < $1.lowercased() }
             for key in sortedKeys {
                 if let value = headers[key] {
-                    logMessage += "-> \(key): \(value)\n"
+                    let loggedValue = safeDiagnosticHeader(key: key, value: value)
+                    logMessage += "-> \(key): \(loggedValue)\n"
                 }
             }
         }
@@ -455,7 +486,7 @@ internal class GravityRepository {
                 let contentType = request.allHTTPHeaderFields?["Content-Type"] ?? "nil"
                 logMessage += "BODY Content-Type: \(contentType)\n"
                 logMessage += "BODY START\n"
-                logMessage += "\(jsonString)\n"
+                logMessage += "\(ReportSanitizer.sanitizeText(jsonString, limit: 5000))\n"
                 logMessage += "BODY END"
             } else {
                 logMessage += "BODY Content-Type: application/json\n"
@@ -473,18 +504,20 @@ internal class GravityRepository {
     private func logHttpResponse(response: HTTPURLResponse, data: Data, method: String) {
         var logMessage = "RESPONSE: \(response.statusCode) \(HTTPURLResponse.localizedString(forStatusCode: response.statusCode))\n"
         logMessage += "METHOD: \(method)\n"
-        logMessage += "FROM: \(response.url?.absoluteString  ?? "nil")\n"
+        logMessage += "FROM: \(ReportSanitizer.sanitizeUrls(response.url?.absoluteString ?? "nil"))\n"
         
         logMessage += "COMMON HEADERS\n"
         for (key, value) in response.allHeaderFields {
-            logMessage += "-> \(key): \(value)\n"
+            logMessage += "-> \(key): \(safeDiagnosticHeader(key: String(describing: key), value: String(describing: value)))\n"
         }
         
-        if let jsonString = String(data: data, encoding: .utf8) {
+        if !(200...299).contains(response.statusCode) {
+            logMessage += "BODY: [omitted for HTTP failure; \(data.count) bytes]"
+        } else if let jsonString = String(data: data, encoding: .utf8) {
             let contentType = response.allHeaderFields["Content-Type"] as? String ?? "nil"
             logMessage += "BODY Content-Type: \(contentType)\n"
             logMessage += "BODY START\n"
-            logMessage += "\(jsonString)\n"
+            logMessage += "\(ReportSanitizer.sanitizeText(jsonString, limit: 5000))\n"
             logMessage += "BODY END"
         } else {
             logMessage += "BODY: [empty or non-UTF8]"

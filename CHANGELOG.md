@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Error reports
+
+- Redact complete Authorization, Proxy-Authorization and X-Authorization values to the end of the line in free-text messages, stack traces and diagnostic fields; preserve following lines.
+- Require valid IPv6 address syntax before exempting bracketed endpoints from credential redaction.
+- Redact JSON and partially encoded slash forms and malformed credential ports; deduplicate sanitized diagnostics with stable transport codes and endpoints.
+- Strip credentials from generic URL schemes and URLs nested after opaque prefixes while preserving following prose.
+- Keep surrounding diagnostics and endpoint paths while stripping secrets from all URL schemes, malformed credentials and escaped URLs in linear passes.
+- Bound backend error reports to ten attempts per rolling minute and suppress identical message/stack reports for a minute after successful delivery; allow failed sends to retry within the budget.
+- Preserve useful encoded endpoint paths in diagnostics while redacting URL credentials, queries and sensitive headers; omit HTTP failure bodies from debug logs.
+- Keep error reports usable before session initialization, preserve the current device identity, sanitize URL credentials and queries, and redact authorization in request logs.
+
 ### Products grid and presentation
 
 - Add product grids with public `GridSettings`, `Style.gridSettings` and a `gridSettings` parameter in `Style.init`; fall back to legacy `gridColumns`, with 2 columns and spacing 8 by default.

@@ -60,12 +60,12 @@ final class DeviceUtils {
         return contextAttributes
     }
 
-    private func getDeviceId() -> String {
+    func getDeviceId() -> String {
         // Keep the full read/create/write atomic, without holding this lock
         // while accessing GravitySDK, session state or presentation state.
         Self.deviceIdLock.lock()
         defer { Self.deviceIdLock.unlock() }
-        if let deviceId = prefs.getDeviceId() {
+        if let deviceId = prefs.getDeviceId(), !deviceId.isEmpty {
             return deviceId
         } else {
             let deviceId = UUID().uuidString

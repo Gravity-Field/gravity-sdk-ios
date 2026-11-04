@@ -409,6 +409,7 @@ public class GravitySDK {
                     identityGeneration: raisedIdentity.generation
                 )
             } catch {
+                if error is CancellationError || Task.isCancelled || (error as? URLError)?.code == .cancelled { return }
                 GravityLogger.e(Self.TAG, "trackView error:  \(error)")
             }
         }
@@ -456,6 +457,7 @@ public class GravitySDK {
                     identityGeneration: raisedIdentity.generation
                 )
             } catch {
+                if error is CancellationError || Task.isCancelled || (error as? URLError)?.code == .cancelled { return }
                 GravityLogger.e(Self.TAG, "triggerEvent error:  \(error)")
             }
         }

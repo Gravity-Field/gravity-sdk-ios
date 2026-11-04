@@ -15,17 +15,22 @@ internal struct EngagementTransport {
         request.httpMethod = "GET"
         request.allHTTPHeaderFields = headers
         logRequest(request)
-        let (data, response) = try await session.data(for: request)
+        let data: Data
+        let response: URLResponse
+        do { (data, response) = try await session.data(for: request) }
+        catch let error as URLError {
+            throw NetworkError.transportFailure(error, method: "GET", url: value)
+        }
         guard let response = response as? HTTPURLResponse else { throw NetworkError.invalidResponse }
         logResponse(response, data)
         guard (200...299).contains(response.statusCode) else {
-            throw NetworkError.httpError(statusCode: response.statusCode)
+            throw NetworkError.httpError(statusCode: response.statusCode, method: "GET", url: value)
         }
     }
 
     static func isRetryable(_ error: Error) -> Bool {
         switch error {
-        case NetworkError.httpError(let status): return status == 408 || status == 429 || status >= 500
+        case NetworkError.httpError(let status, _, _): return status == 408 || status == 429 || status >= 500
         case NetworkError.invalidURL: return false
         default: return true
         }

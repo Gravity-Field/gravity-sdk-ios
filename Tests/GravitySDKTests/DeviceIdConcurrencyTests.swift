@@ -126,13 +126,13 @@ extension SDKSingletonTests {
             #expect(seed.string(forKey: "unrelated") == "preserved")
         }
 
-        @Test @MainActor func nonStringDeviceIdsAreReplaced() throws {
+        @Test @MainActor func emptyAndNonStringDeviceIdsAreReplaced() throws {
             let name = "GravitySDK.device-id-test.\(UUID())"
             let defaults = try #require(DeviceIdDefaults(suiteName: name))
             defer { defaults.removePersistentDomain(forName: name) }
             let seed = try #require(UserDefaults(suiteName: name))
             let deviceUtils = DeviceUtils(prefs: Prefs(userDefaults: defaults))
-            for value: Any in [42, true, ["invalid"], ["invalid": "value"], Data([1, 2])] {
+            for value: Any in ["", 42, true, ["invalid"], ["invalid": "value"], Data([1, 2])] {
                 seed.set(value, forKey: "gravity_device_id")
                 let writes = defaults.deviceWrites
                 let id = try #require(deviceUtils.getDevice().id)
@@ -149,7 +149,7 @@ extension SDKSingletonTests {
             let seed = try #require(UserDefaults(suiteName: name))
             let deviceUtils = DeviceUtils(prefs: Prefs(userDefaults: defaults))
             // Existing string IDs remain compatible; UUID validation is not added.
-            for value in ["existing-device", "", "changed-device"] {
+            for value in ["existing-device", "changed-device"] {
                 seed.set(value, forKey: "gravity_device_id")
                 #expect(deviceUtils.getDevice().id == value)
                 #expect(DeviceUtils(prefs: Prefs(userDefaults: defaults)).getDevice().id == value)

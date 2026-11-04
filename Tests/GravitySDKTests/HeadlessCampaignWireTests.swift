@@ -472,16 +472,25 @@ final class HeadlessCampaignWireTests: XCTestCase {
     func testStaleChooseIsDiscardedWithoutTryingNextCampaign() async throws {
         for event in [false, true] {
             let callbacks = HeadlessCallbackRecorder()
-            try await withServer(callback: { callbacks.record($0) }) { sdk, server in
-                sdk.staleContentTimeout = 0.03
+            let unexpected = expectation(description: "Stale choose must not emit a callback")
+            unexpected.isInverted = true
+            try await withServer(callback: { callbacks.record($0); unexpected.fulfill() }) { sdk, server in
+                sdk.staleContentTimeout = 60
+                let release = DispatchGroup()
+                release.enter()
                 let ids = [campaign("first", 2), campaign("second", 1)]
                 let answer = content("first", trackingBase: server.url)
                 server.setResponseHandler { request in
                     if request.path == "/visit" || request.path == "/event" { return .init(json: ["campaigns": ids]) }
-                    return .init(json: ["data": answer], delay: 0.08)
+                    return .init(json: ["data": answer], sendAfter: release)
                 }
-                expectNil(try await fetch(sdk, event: event))
-                try await Task.sleep(nanoseconds: 50_000_000)
+                let pending = Task { try await fetch(sdk, event: event) }
+                defer { pending.cancel() }
+                _ = await server.waitFor(2)
+                sdk.staleContentTimeout = 0
+                release.leave()
+                expectNil(try await pending.value)
+                await fulfillment(of: [unexpected], timeout: 1)
                 XCTAssertEqual(chosen(server), ["first"])
                 XCTAssertEqual(server.recorded.count, 2)
                 XCTAssertTrue(callbacks.events.isEmpty)

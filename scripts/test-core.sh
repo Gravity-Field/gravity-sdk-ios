@@ -12,6 +12,7 @@ swiftc -D CORE_TEST_HARNESS -parse-as-library \
     "$repo/Sources/GravitySDK/utils/VisibleImpressionDelivery.swift" \
     "$repo/Sources/GravitySDK/network/EngagementTransport.swift" \
     "$repo/Sources/GravitySDK/network/NetworkError.swift" \
+    "$repo/Sources/GravitySDK/utils/ReportSanitizer.swift" \
     "$repo/Tests/GravitySDKTests/GravitySDKTests.swift" \
     "$repo/Tests/Portable/CoreTestHarness.swift" -o "$test_dir/core-tests"
 "$test_dir/core-tests"

@@ -7,6 +7,8 @@ internal enum LogMessageLevel: String, Codable {
     case debug
 }
 
+/// The error report sent to the backend. URLs in its free text lose their query,
+/// fragment and credentials on the way in, whatever the caller passes.
 internal struct LogMessage: Codable {
     internal let message: String
     internal let level: LogMessageLevel
@@ -32,16 +34,16 @@ internal struct LogMessage: Codable {
         extra: [String: String] = [:],
         tags: [String: String] = [:]
     ) {
-        self.message = message
+        self.message = ReportSanitizer.sanitizeText(message, limit: 1000)
         self.level = level
         self.sec = sec
         self.uid = uid
         self.ses = ses
         self.sdkVersion = sdkVersion
         self.platform = platform
-        self.stacktrace = stacktrace
-        self.extra = extra
-        self.tags = tags
+        self.stacktrace = ReportSanitizer.sanitizeText(stacktrace, limit: 5000)
+        self.extra = ReportSanitizer.sanitizeValues(extra)
+        self.tags = ReportSanitizer.sanitizeValues(tags)
     }
 
     enum CodingKeys: String, CodingKey {

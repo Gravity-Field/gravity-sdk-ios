@@ -19,6 +19,14 @@ final class RecordingServer: @unchecked Sendable {
         var disconnect = false
     }
 
+    private var requestObserver: ((Request) -> Void)?
+    private var requestWaiters: [UUID: (count: Int, continuation: CheckedContinuation<[Request], Never>)] = [:]
+
+    /// Called on the server queue; observers should signal expectations, not query this server.
+    func observeRequests(_ observer: ((Request) -> Void)?) {
+        queue.sync { requestObserver = observer }
+    }
+
     private var responseHandler: ((Request) -> Response)?
 
     func setResponseHandler(_ handler: @escaping (Request) -> Response) {
@@ -108,13 +116,18 @@ final class RecordingServer: @unchecked Sendable {
         queue.sync { requests }
     }
 
-    /// Waits until at least `count` requests arrived (async SDK flows).
-    func waitFor(_ count: Int, timeout: TimeInterval = 5) async -> [Request] {
-        let deadline = Date().addingTimeInterval(timeout)
-        while recorded.count < count, Date() < deadline {
-            try? await Task.sleep(nanoseconds: 20_000_000)
+    /// Resumes directly from request receipt, with a bounded timeout for negative cases.
+    func waitFor(_ count: Int, timeout: TimeInterval = 10) async -> [Request] {
+        await withCheckedContinuation { continuation in
+            queue.async {
+                if self.requests.count >= count { continuation.resume(returning: self.requests); return }
+                let id = UUID()
+                self.requestWaiters[id] = (count, continuation)
+                self.queue.asyncAfter(deadline: .now() + timeout) {
+                    self.requestWaiters.removeValue(forKey: id)?.continuation.resume(returning: self.requests)
+                }
+            }
         }
-        return recorded
     }
 
     private func handle(_ connection: NWConnection) {
@@ -139,6 +152,12 @@ final class RecordingServer: @unchecked Sendable {
             if let data { buffer.append(data) }
             if let request = Self.parse(buffer) {
                 self.requests.append(request)
+                let ready = self.requestWaiters.filter { self.requests.count >= $0.value.count }
+                for (id, waiter) in ready {
+                    self.requestWaiters.removeValue(forKey: id)
+                    waiter.continuation.resume(returning: self.requests)
+                }
+                self.requestObserver?(request)
                 self.respond(connection, request: request)
             } else if isComplete || error != nil {
                 connection.cancel()
