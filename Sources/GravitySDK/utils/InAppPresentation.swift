@@ -4,6 +4,7 @@ import Foundation
 internal final class InAppPresentation {
     private var isClosing = false
     private var result: Bool?
+    var isOpen: Bool { result == nil && !isClosing }
     private let willClose: () -> Void
     private let performDismiss: (@escaping (Bool) -> Void) -> Void
     private let didDismiss: (Bool) -> Void

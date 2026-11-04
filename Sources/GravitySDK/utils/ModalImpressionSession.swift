@@ -9,10 +9,13 @@ internal final class ModalImpressionSession {
     // True means accepted by the SDK outbox; its staged protection survives UI disposal.
     private let confirm: () -> Bool
     private let release: () -> Void
+    private let valid: () -> Bool
+    var isValid: Bool { valid() }
 
-    init(confirm: @escaping () -> Bool, release: @escaping () -> Void) {
+    init(confirm: @escaping () -> Bool, release: @escaping () -> Void, valid: @escaping () -> Bool = { true }) {
         self.confirm = confirm
         self.release = release
+        self.valid = valid
     }
 
     var hasFired: Bool {
@@ -22,7 +25,7 @@ internal final class ModalImpressionSession {
 
     func confirmFrame(isActive: Bool) {
         lock.lock(); defer { lock.unlock() }
-        guard isActive else { return }
+        guard isActive, isValid else { return }
         appeared = true
         fireIfNeeded()
     }

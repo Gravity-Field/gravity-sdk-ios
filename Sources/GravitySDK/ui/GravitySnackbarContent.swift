@@ -3,11 +3,15 @@ import SwiftUI
 struct GravitySnackbarContent: View {
     let content: CampaignContent
     let campaign: Campaign
+    let impressionSession: ModalImpressionSession
+    var visibilityClock: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
+    var onImpression: () -> Void = {}
     let onClickCallback: (OnClickModel) -> Void
     let onDismiss: () -> Void
 
     @State private var hasSentImpression = false
 
+    @State private var hasStartedTimer = false
     @State var showSnackbar = false
 
     private var frameUi: FrameUI? {
@@ -49,8 +53,8 @@ struct GravitySnackbarContent: View {
             }
         }
         .onAppear {
-            ContentEventService.instance.sendContentImpression(content, campaign)
-
+            guard !hasStartedTimer else { return }
+            hasStartedTimer = true
             withAnimation(.default) {
                 showSnackbar = true
             }
@@ -79,7 +83,13 @@ struct GravitySnackbarContent: View {
             default: EmptyView()
             }
 
-        ZStack {
+        ModalContentVisibilityTracker(session: impressionSession, minimumVisibleFraction: 0.5, visibleDuration: 1, now: visibilityClock,
+            onFirstVisibleFrame: {
+                guard !hasSentImpression else { return }
+                hasSentImpression = true
+                onImpression()
+                ContentEventService.instance.sendContentImpression(content, campaign)
+            }) {
             AnyView(view)
                 .applyIf(padding != nil) { view in
                     view.padding(

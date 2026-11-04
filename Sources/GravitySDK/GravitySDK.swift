@@ -16,6 +16,7 @@ public class GravitySDK {
     internal let productFilter: ProductFilter?
     internal let customFont: UIFont?
     private let inAppPreparation: InAppPreparation?
+    private let presentationTiming: PresentationTiming
     private let presentationRevision = PresentationRevision()
     private let inAppPresentations = InAppPresentationRegistry()
     internal var campaignDelayTiming = CampaignDelayTiming()
@@ -28,8 +29,10 @@ public class GravitySDK {
         productFilter: ProductFilter?,
         uiSettings: UISettings?,
         inAppPreparation: InAppPreparation? = nil,
-        visibleImpressionStore: VisibleImpressionStore? = nil
+        visibleImpressionStore: VisibleImpressionStore? = nil,
+        presentationTiming: PresentationTiming = PresentationTiming()
     ) {
+        self.presentationTiming = presentationTiming
         self.apiKey = apiKey
         self.section = section
         let store = visibleImpressionStore ?? Self.impressionStore(apiKey: apiKey, section: section)
@@ -855,6 +858,7 @@ public class GravitySDK {
     @MainActor private func registerInApp(
         _ content: CampaignContent, _ campaign: Campaign,
         impressionSession: ModalImpressionSession? = nil,
+        shouldTrackClose: @escaping () -> Bool = { true },
         performDismiss: @escaping (@escaping (Bool) -> Void) -> Void
     ) -> InAppPresentation {
         weak var registered: InAppPresentation?
@@ -863,7 +867,8 @@ public class GravitySDK {
         }, performDismiss: performDismiss) { [weak self] success in
             guard let self = self else { return }
             self.inAppPresentations.remove(registered, contentId: content.contentId)
-            if success { self.contentEventService.sendContentClosed(content, campaign) }
+            if success && shouldTrackClose() { self.contentEventService.sendContentClosed(content, campaign) }
+            else { self.presentationGate.closed(contentId: content.contentId) }
         }
         registered = presentation
         inAppPresentations.register(presentation, contentId: content.contentId)
@@ -955,8 +960,9 @@ public class GravitySDK {
         case .modal: showModal(content, campaign, viewController, impressionSession: opening, item: item)
         case .bottomSheet: showBottomSheet(content, campaign, viewController, impressionSession: opening, item: item)
         case .snackBar:
-            guard let template = content.templateSystemName, template != .unknown else { return false }
-            showSnackbar(content, campaign, viewController)
+            guard let template = content.templateSystemName, template != .unknown,
+                  content.variables?.frameUI != nil, viewController.viewIfLoaded?.window != nil else { return false }
+            showSnackbar(content, campaign, viewController, impressionSession: opening)
         case .inline, .unknown: return false
         }
         return true
@@ -965,12 +971,20 @@ public class GravitySDK {
     @MainActor internal func makeModalImpressionSession(
         _ content: CampaignContent, _ campaign: Campaign
     ) -> ModalImpressionSession {
-        let scope = presentationGate.scoped { impressionScope }
+        let identityGeneration = presentationGate.scoped { repository.sessionManager.generation }
         let openingId = UUID()
         return ModalImpressionSession(confirm: { [self] in
-            contentEventService.sendModalVisibleImpression(content, campaign, sdk: self,
-                openingId: openingId, scope: scope)
-        }, release: { [weak self] in self?.presentationGate.closed(contentId: content.contentId) })
+            presentationGate.scoped {
+                guard repository.sessionManager.isCurrent(identityGeneration) else { return false }
+                return contentEventService.sendModalVisibleImpression(content, campaign, sdk: self,
+                    openingId: openingId, scope: impressionScope)
+            }
+        }, release: { [weak self] in self?.presentationGate.closed(contentId: content.contentId) }, valid: { [weak self] in
+            guard let self else { return false }
+            return self.presentationGate.scoped {
+                self.repository.sessionManager.isCurrent(identityGeneration)
+            }
+        })
     }
 
     @MainActor private func showFullScreen(
@@ -1127,7 +1141,8 @@ public class GravitySDK {
     @MainActor private func showSnackbar(
         _ content: CampaignContent,
         _ campaign: Campaign,
-        _ viewController: UIViewController
+        _ viewController: UIViewController,
+        impressionSession: ModalImpressionSession
     ) {
         let template = content.templateSystemName
         if template == nil || template == TemplateSystemName.unknown { return }
@@ -1135,7 +1150,9 @@ public class GravitySDK {
         weak var weakHostingController:
             UIHostingController<GravitySnackbarContent>?
 
-        let presentation = registerInApp(content, campaign) { complete in
+        var hasAppeared = false
+        let presentation = registerInApp(content, campaign, impressionSession: impressionSession,
+            shouldTrackClose: { hasAppeared }) { complete in
             guard let hostingController = weakHostingController,
                   hostingController.view.superview != nil else { complete(false); return }
             hostingController.willMove(toParent: nil)
@@ -1150,12 +1167,18 @@ public class GravitySDK {
         let snackbarView = GravitySnackbarContent(
             content: content,
             campaign: campaign,
+            impressionSession: impressionSession,
+            visibilityClock: presentationTiming.now,
+            onImpression: { hasAppeared = true },
             onClickCallback: { onClickModel in
+                guard presentation.isOpen else { return }
                 self.onClickHandler(
                     onClickModel: onClickModel,
                     content: content,
                     campaign: campaign,
                     viewController: viewController,
+                    impressionSession: impressionSession,
+                    closeTrackedOnDismiss: true,
                     dismissCallback: dismiss
                 )
             },
@@ -1196,12 +1219,15 @@ public class GravitySDK {
         campaign: Campaign,
         viewController: UIViewController,
         impressionSession: ModalImpressionSession? = nil,
+        closeTrackedOnDismiss: Bool = false,
         dismissCallback: (() -> Void)? = nil
     ) {
         let action = onClickModel.action
         let closeOnClick = onClickModel.closeOnClick
 
-        trackEngagementEvent(action, content.events)
+        if !(closeTrackedOnDismiss && action == .close && content.variables?.onClose?.action == .close) {
+            trackEngagementEvent(action, content.events)
+        }
 
         if action != .close && closeOnClick {
             dismissCallback?()

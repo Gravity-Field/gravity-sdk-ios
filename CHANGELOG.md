@@ -43,6 +43,14 @@
 - Add async `trackViewNoShow` and `triggerEventNoShow` to return campaign content and raw JSON without opening UI or sending client impression events; candidates are tried by descending priority.
 - Add `isFetchContentOnTrack` and `staleContentTimeout` to control NoShow fetching before or after initialization. Settings survive reinitialization, timeout updates affect in-flight requests, and host request options are passed unchanged. Each content candidate uses the current options and content settings.
 
+### Snackbar presentation
+
+- Remove snackbars dismissed before their first visible frame without impression or close tracking; keep successful dismissal results and completion after removal.
+- Pause snackbar and modal impression visibility behind presented controllers or opaque covering views; resume after the content is exposed.
+- Keep attached snackbar and modal impressions valid across normal server UID updates and bind durable delivery to the identity scope at visibility confirmation.
+- Discard pending modal visible impressions after `setUser`, `resetUser` or `restoreUserId` changes the opening identity.
+- Track snackbar visible impressions through the durable outbox after half the content stays visible for one active second; send one impression per showing and avoid duplicate close tracking.
+
 ## 1.2.0
 
 - Add `getContentBySelectorWithDetails` and `getContentByCampaignIdWithDetails`: the model plus the raw JSON of the same response
