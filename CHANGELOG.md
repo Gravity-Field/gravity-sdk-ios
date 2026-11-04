@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Choose requests
+
+- Send content settings under `option` in all choose requests.
+
 ### Error reports
 
 - Redact complete Authorization, Proxy-Authorization and X-Authorization values to the end of the line in free-text messages, stack traces and diagnostic fields; preserve following lines.
