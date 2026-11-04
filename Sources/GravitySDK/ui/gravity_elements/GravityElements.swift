@@ -42,11 +42,16 @@ struct GravityElements: View {
                             content: content,
                             campaign: campaign
                         )
-                    default:
-                        EmptyView()
+                    case .grid:
+                        ProductsGrid(
+                            element: element,
+                            slots: slots,
+                            content: content,
+                            campaign: campaign
+                        )
                     }
                 } else {
-                    EmptyView()
+                    Color.clear.frame(height: CGFloat(element.style.size?.height ?? 0))
                 }
             case .itemsContainer:
                 if let items = content.items {

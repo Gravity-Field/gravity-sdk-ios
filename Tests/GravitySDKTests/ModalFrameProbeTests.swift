@@ -157,7 +157,7 @@ private struct SheetHarness: View {
 
     var body: some View {
         CustomSheet(isPresented: $state.isPresented, cornerRadius: 8, imagePrerollDelay: 0,
-            onWillDismiss: willDismiss, onDismiss: dismissed) {
+            onWillDismiss: willDismiss, onDismiss: dismissed, containerHeight: 800) {
             Color.red.frame(height: 180).onAppear(perform: appeared).onDisappear(perform: disappeared)
         }.onAppear(perform: mounted)
     }

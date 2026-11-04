@@ -19,11 +19,10 @@ final class ProductView: UIView {
     private func setup(slot: Slot) {
         backgroundColor = .clear
 
-        translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            widthAnchor.constraint(equalToConstant: 164),
-            heightAnchor.constraint(equalToConstant: 250)
-        ])
+        setContentHuggingPriority(.required, for: .horizontal)
+        setContentHuggingPriority(.required, for: .vertical)
+        setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        setContentCompressionResistancePriority(.defaultLow, for: .vertical)
 
         let imageUrl = slot.item["image_url"] as? String
         let name = slot.item["name"] as? String ?? ""
@@ -33,6 +32,10 @@ final class ProductView: UIView {
         let imageView = UIImageView()
         imageView.contentMode = .scaleAspectFit
         imageView.clipsToBounds = true
+        imageView.setContentHuggingPriority(.fittingSizeLevel, for: .horizontal)
+        imageView.setContentHuggingPriority(.fittingSizeLevel, for: .vertical)
+        imageView.setContentCompressionResistancePriority(.fittingSizeLevel, for: .horizontal)
+        imageView.setContentCompressionResistancePriority(.fittingSizeLevel, for: .vertical)
         imageView.translatesAutoresizingMaskIntoConstraints = false
         loadImage(from: imageUrl, into: imageView)
 
@@ -46,6 +49,7 @@ final class ProductView: UIView {
         imageContainer.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
         imageContainer.addSubview(imageView)
         NSLayoutConstraint.activate([
+            imageContainer.heightAnchor.constraint(greaterThanOrEqualToConstant: 0),
             imageView.leadingAnchor.constraint(equalTo: imageContainer.leadingAnchor),
             imageView.trailingAnchor.constraint(equalTo: imageContainer.trailingAnchor),
             imageView.topAnchor.constraint(equalTo: imageContainer.topAnchor),
@@ -58,10 +62,16 @@ final class ProductView: UIView {
         nameLabel.textColor = .black
         nameLabel.numberOfLines = 2
         nameLabel.lineBreakMode = .byTruncatingTail
+        nameLabel.setContentCompressionResistancePriority(UILayoutPriority(751), for: .vertical)
+        // Reserve the same title space in every card; images yield first in narrow cells.
+        let titleHeight = nameLabel.heightAnchor.constraint(equalToConstant: ceil(nameLabel.font.lineHeight) * 2)
+        titleHeight.priority = .defaultHigh
+        titleHeight.isActive = true
 
         let priceLabel = UILabel()
         priceLabel.text = "\(price) ₽"
         priceLabel.font = .boldSystemFont(ofSize: 16)
+        priceLabel.setContentCompressionResistancePriority(UILayoutPriority(752), for: .vertical)
         priceLabel.textColor = inStock
             ? UIColor(red: 1.0, green: 0.30, blue: 0.30, alpha: 1)
             : UIColor(white: 0.46, alpha: 1)

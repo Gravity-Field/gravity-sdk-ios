@@ -36,32 +36,44 @@ struct GravityFullScreenContent: View {
         frameUi?.close
     }
 
+    @State private var contentHeight: CGFloat = 0
+
     var body: some View {
         ModalContentVisibilityTracker(session: impressionSession) {
             ZStack {
-                VStack(alignment: horizontalAlignment) {
-                    GravityElements(
-                        content: content,
-                        campaign: campaign,
-                        onClickCallback: onClickCallback,
-                        item: item
-                    )
+                GeometryReader { geometry in
+                    ScrollView {
+                        VStack(alignment: horizontalAlignment) {
+                            GravityElements(
+                                content: content,
+                                campaign: campaign,
+                                onClickCallback: onClickCallback,
+                                item: item
+                            )
+                        }
+                        .frame(maxWidth: .infinity, minHeight: max(0, geometry.size.height - (padding?.top ?? 0) - (padding?.bottom ?? 0)), alignment: verticalAlignment)
+                        .background(
+                            GeometryReader { contentGeometry in
+                                Color.clear
+                                    .onAppear { contentHeight = contentGeometry.size.height }
+                                    .onChange(of: contentGeometry.size.height) { contentHeight = $0 }
+                            }
+                        )
+                        .background(GravityScrollConfiguration(isEnabled: contentHeight > max(0, geometry.size.height - (padding?.top ?? 0) - (padding?.bottom ?? 0)) + 0.5))
+                        .gravityScrollContent()
+                    }
+                    .gravityScrollBehavior(isEnabled: contentHeight > max(0, geometry.size.height - (padding?.top ?? 0) - (padding?.bottom ?? 0)) + 0.5)
+                    .padding(EdgeInsets(top: padding?.top ?? 0, leading: padding?.left ?? 0,
+                                        bottom: padding?.bottom ?? 0, trailing: padding?.right ?? 0))
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: verticalAlignment)
-                .applyIf(padding != nil) {
-                    $0.padding(.init(
-                        top: padding!.top,
-                        leading: padding!.left,
-                        bottom: padding!.bottom,
-                        trailing: padding!.right
-                    ))
-                }
+                .clipped()
                 .background(
                     GravityBackgroundView(
                         backgroundColor: style?.backgroundColor ?? Color(.systemBackground),
                         backgroundImage: style?.backgroundImage,
                         backgroundFit: style?.backgroundFit
                     )
+                    .ignoresSafeArea()
                 )
 
                 if let close = close {
@@ -69,6 +81,7 @@ struct GravityFullScreenContent: View {
                 }
             }
         }
+        .ignoresSafeArea(.container, edges: .bottom)
         .onAppear {
             ContentEventService.instance.sendContentImpression(content, campaign)
         }

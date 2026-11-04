@@ -27,6 +27,7 @@ public struct Style: Decodable, Equatable {
     public let productContainerType: ProductContainerType?
     public let gridColumns: Int?
     public let rowSpacing: Double?
+    public let gridSettings: GridSettings?
 
     public init(
         backgroundColor: Color? = nil,
@@ -50,7 +51,8 @@ public struct Style: Decodable, Equatable {
         weight: Float? = nil,
         productContainerType: ProductContainerType? = nil,
         gridColumns: Int? = nil,
-        rowSpacing: Double? = nil
+        rowSpacing: Double? = nil,
+        gridSettings: GridSettings? = nil
     ) {
         self.backgroundColor = backgroundColor
         self.backgroundImage = backgroundImage
@@ -74,12 +76,13 @@ public struct Style: Decodable, Equatable {
         self.productContainerType = productContainerType
         self.gridColumns = gridColumns
         self.rowSpacing = rowSpacing
+        self.gridSettings = gridSettings
     }
 
     private enum CodingKeys: String, CodingKey {
         case backgroundColor, backgroundImage, backgroundFit, pressColor, outlineColor, cornerRadius, size, margin, padding
         case fontSize, fontWeight, textColor, textcolor, textStyle, fit, contentAlignment, verticalAlignment, layoutWidth
-        case positioned, weight, productContainerType, gridColumns, rowSpacing
+        case positioned, weight, productContainerType, gridColumns, rowSpacing, gridSettings
     }
 
     public init(from decoder: Decoder) throws {
@@ -113,6 +116,7 @@ public struct Style: Decodable, Equatable {
         productContainerType = try? container.decodeIfPresent(ProductContainerType.self, forKey: .productContainerType)
         gridColumns = try? container.decodeIfPresent(Int.self, forKey: .gridColumns)
         rowSpacing = try? container.decodeOptionalDimension(forKey: .rowSpacing)
+        gridSettings = try? container.decodeIfPresent(GridSettings.self, forKey: .gridSettings)
     }
 
     public static let empty = Style()
@@ -349,7 +353,7 @@ extension KeyedDecodingContainer {
         } else if let value = try? self.decode(Int.self, forKey: key) {
             return Double(value)
         } else if let value = try? self.decode(String.self, forKey: key) {
-            return Double(value)
+            return Double(value.replacingOccurrences(of: "px", with: "").trimmingCharacters(in: .whitespacesAndNewlines))
         }
         return nil
     }
@@ -402,5 +406,42 @@ extension Double {
         case 900: return .black
         default: return .regular
         }
+    }
+}
+
+public struct GridSettings: Decodable, Equatable {
+    public let columns: Double?
+    public let horizontalSpacing: Double?
+    public let verticalSpacing: Double?
+
+    public init(columns: Double? = nil, horizontalSpacing: Double? = nil, verticalSpacing: Double? = nil) {
+        self.columns = columns
+        self.horizontalSpacing = horizontalSpacing
+        self.verticalSpacing = verticalSpacing
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case columns, horizontalSpacing, verticalSpacing
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        columns = try? container.decodeOptionalDimension(forKey: .columns)
+        horizontalSpacing = try? container.decodeOptionalDimension(forKey: .horizontalSpacing)
+        verticalSpacing = try? container.decodeOptionalDimension(forKey: .verticalSpacing)
+    }
+
+    var validColumns: Int? {
+        guard let columns = columns, columns.isFinite, columns >= 1,
+              columns <= 12 else { return nil }
+        return Int(columns)
+    }
+
+    var horizontalSpacingValue: Double { Self.validSpacing(horizontalSpacing) }
+    var verticalSpacingValue: Double { Self.validSpacing(verticalSpacing) }
+
+    private static func validSpacing(_ value: Double?) -> Double {
+        guard let value = value, value.isFinite, value >= 0 else { return 8 }
+        return value
     }
 }

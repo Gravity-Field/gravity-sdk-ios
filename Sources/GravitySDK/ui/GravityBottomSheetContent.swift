@@ -71,38 +71,60 @@ struct GravityBottomSheetContent: View {
     }
 
     @State private var showSheet = false
+    @State private var contentHeight: CGFloat = 0
 
     var body: some View {
+        GeometryReader { geometry in
+            sheet(maximumContentHeight: geometry.size.height,
+                  bottomInset: geometry.safeAreaInsets.bottom)
+        }
+    }
 
-            CustomSheet(
+    private func sheet(maximumContentHeight: CGFloat, bottomInset: CGFloat) -> some View {
+        let contentOverflows = contentHeight > maximumContentHeight + 0.5
+        return CustomSheet(
                 isPresented: $showSheet,
                 cornerRadius: style?.cornerRadius ?? 0,
                 imagePrerollDelay: imagePrerollDelay,
                 onWillDismiss: {
                     impressionSession.explicitClose()
                 },
-                onDismiss: onDismiss
+                onDismiss: onDismiss,
+                containerHeight: maximumContentHeight + bottomInset
             ) {
                 ModalContentVisibilityTracker(session: impressionSession) {
                     VStack(spacing: 0) {
                         ZStack {
-                            VStack(alignment: horizontalAlignment) {
-                                GravityElements(
-                                    content: content,
-                                    campaign: campaign,
-                                    onClickCallback: onClickCallback,
-                                    item: item
+                            ScrollView {
+                                VStack(alignment: horizontalAlignment) {
+                                    GravityElements(
+                                        content: content,
+                                        campaign: campaign,
+                                        onClickCallback: onClickCallback,
+                                        item: item
+                                    )
+                                }
+                                .frame(maxWidth: .infinity)
+                                .applyIf(padding != nil) {
+                                    $0.padding(.init(
+                                        top: padding!.top,
+                                        leading: padding!.left,
+                                        bottom: padding!.bottom,
+                                        trailing: padding!.right
+                                    ))
+                                }
+                                .background(
+                                    GeometryReader { geometry in
+                                        Color.clear
+                                            .onAppear { contentHeight = geometry.size.height }
+                                            .onChange(of: geometry.size.height) { contentHeight = $0 }
+                                    }
                                 )
+                                .background(GravityScrollConfiguration(isEnabled: contentOverflows))
+                                .gravityScrollContent()
                             }
-                            .frame(maxWidth: .infinity)
-                            .applyIf(padding != nil) {
-                                $0.padding(.init(
-                                    top: padding!.top,
-                                    leading: padding!.left,
-                                    bottom: padding!.bottom,
-                                    trailing: padding!.right
-                                ))
-                            }
+                            .gravityScrollBehavior(isEnabled: contentOverflows)
+                            .frame(height: min(contentHeight, maximumContentHeight))
 
                             if let close = close {
                                 CloseButton(close: close, onClickCallback: onClickCallback)
@@ -117,7 +139,7 @@ struct GravityBottomSheetContent: View {
                         )
 
                         sheetBackgroundColor
-                            .frame(height: Self.bottomSafeAreaInset)
+                            .frame(height: bottomInset)
                     }
                     .frame(maxWidth: .infinity)
                 }
@@ -132,13 +154,6 @@ struct GravityBottomSheetContent: View {
             }
     }
 
-    private static var bottomSafeAreaInset: CGFloat {
-        UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .flatMap { $0.windows }
-            .first { $0.isKeyWindow }?
-            .safeAreaInsets.bottom ?? 0
-    }
 }
 
 private let customSheetOpenAnimationDuration: TimeInterval = 0.6
@@ -149,6 +164,8 @@ struct CustomSheet<Content: View>: View {
     let imagePrerollDelay: TimeInterval
     let onWillDismiss: () -> Void
     let onDismiss: () -> Void
+    let containerHeight: CGFloat
+    var allowsDrag: Bool = true
     @ViewBuilder let content: () -> Content
 
     @State private var isVisible = false
@@ -158,7 +175,7 @@ struct CustomSheet<Content: View>: View {
     @State private var revealWindow: GravityImageRevealWindow?
 
     private var screenHeight: CGFloat {
-        UIScreen.main.bounds.height
+        max(1, containerHeight)
     }
 
     private var currentDimOpacity: CGFloat {
@@ -183,11 +200,19 @@ struct CustomSheet<Content: View>: View {
                             corners: [.topLeft, .topRight]
                         )
                     )
+                    .background(SheetDragGesture(isEnabled: allowsDrag && isPresented, changed: { translation in
+                        dragOffset = min(translation, screenHeight * 0.6)
+                    }, ended: { translation, velocity in
+                        if translation > screenHeight * 0.3 || velocity > 700 {
+                            isPresented = false
+                        } else {
+                            withAnimation(.spring()) { dragOffset = 0 }
+                        }
+                    }))
                     .offset(y: slideOffset + dragOffset)
-                    .gesture(dragGesture)
             }
         }
-        .ignoresSafeArea()
+        .ignoresSafeArea(.container, edges: .bottom)
         .onChange(of: isPresented) { newValue in
             if newValue {
                 openSheet()
@@ -195,29 +220,6 @@ struct CustomSheet<Content: View>: View {
                 closeSheet()
             }
         }
-    }
-
-    private var dragGesture: some Gesture {
-        DragGesture()
-            .onChanged { value in
-                let newOffset = value.translation.height
-                if newOffset > 0 && newOffset < screenHeight * 0.6 {
-                    dragOffset = newOffset
-                }
-            }
-            .onEnded { value in
-                let velocity =
-                    value.predictedEndTranslation.height
-                    - value.translation.height
-
-                if dragOffset > screenHeight * 0.3 || velocity > 150 {
-                    isPresented = false
-                } else {
-                    withAnimation(.spring()) {
-                        dragOffset = 0
-                    }
-                }
-            }
     }
 
     private func openSheet() {

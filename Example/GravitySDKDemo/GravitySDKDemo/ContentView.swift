@@ -131,6 +131,10 @@ struct ContentView: View {
                     showReviewPromptTestConsole = true
                 }
                 
+                NavigationLink("Products grid") {
+                    ProductsGridExampleView()
+                }
+
                 GravityInlineSwiftUIView(
                     selector: "homepage_inline_banner",
                     pageContext: PageContext(
