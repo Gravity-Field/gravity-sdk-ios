@@ -12,11 +12,12 @@ internal class ContentEventService {
     func sendContentLoaded(
         _ content: CampaignContent,
         _ campaign: Campaign,
-        callbackTrackingEvent: Bool = true
+        callbackTrackingEvent: Bool = true,
+        delayTime: Int = 0
     ) {
         if callbackTrackingEvent {
             GravitySDK.instance.callbackTrackingEvent(
-                ContentLoadEvent(content: content, campaign: campaign)
+                ContentLoadEvent(content: content, campaign: campaign, delayTime: delayTime)
             )
         }
         

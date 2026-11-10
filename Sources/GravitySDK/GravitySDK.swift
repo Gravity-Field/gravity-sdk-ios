@@ -18,6 +18,7 @@ public class GravitySDK {
     private let inAppPreparation: InAppPreparation?
     private let presentationRevision = PresentationRevision()
     private let inAppPresentations = InAppPresentationRegistry()
+    internal var campaignDelayTiming = CampaignDelayTiming()
 
     internal init(
         apiKey: String,
@@ -380,6 +381,17 @@ public class GravitySDK {
         trackViewTask(pageContext: pageContext, viewController: viewController)
     }
 
+    /// Automatic tasks must not retain an explicitly supplied host while waiting.
+    private final class AutomaticPresentationTarget {
+        weak var viewController: UIViewController?
+        let wasSupplied: Bool
+
+        init(_ viewController: UIViewController?) {
+            self.viewController = viewController
+            wasSupplied = viewController != nil
+        }
+    }
+
     @discardableResult
     internal func trackViewTask(
         pageContext: PageContext,
@@ -388,6 +400,7 @@ public class GravitySDK {
         guard checkInitialized() else { return nil }
 
         let (request, requestUser, revision, raisedIdentity) = automaticRequest(pageContext, newScreen: true)
+        let target = AutomaticPresentationTarget(viewController)
         return Task {
             do {
                 guard
@@ -402,7 +415,7 @@ public class GravitySDK {
                 try await handleCampaignIdsResponse(
                     campaignIdsResponse,
                     pageContext,
-                    viewController,
+                    target,
                     request: request,
                     requestUser: requestUser,
                     revision: revision,
@@ -434,6 +447,7 @@ public class GravitySDK {
         let raisedAt = Date()
 
         let (request, requestUser, revision, raisedIdentity) = automaticRequest(pageContext, newScreen: false)
+        let target = AutomaticPresentationTarget(viewController)
         return Task {
             do {
                 guard
@@ -450,7 +464,7 @@ public class GravitySDK {
                 try await handleCampaignIdsResponse(
                     campaignIdsResponse,
                     pageContext,
-                    viewController,
+                    target,
                     request: request,
                     requestUser: requestUser,
                     revision: revision,
@@ -467,6 +481,9 @@ public class GravitySDK {
     /// Failed content requests are logged and skipped. Only the returned response emits
     /// ContentLoadEvent callbacks and configured onLoad tracking URLs, as getContent does.
     /// No UI or impression/visible-impression events are sent automatically.
+    /// Returns immediately after loading; delayTime is the chosen campaign's
+    /// nonnegative delay in milliseconds for the host to wait before rendering.
+    /// The load callback observes the same delay; json remains the raw /choose body.
     /// Returns nil if tracking fails, no candidate yields content, or the request becomes
     /// stale or its identity changes; task cancellation throws CancellationError.
     public func trackViewNoShow(
@@ -476,6 +493,8 @@ public class GravitySDK {
     }
 
     /// Sends events and resolves content with the same semantics as trackViewNoShow.
+    /// Returns loaded content immediately with the chosen campaign's delayTime in
+    /// milliseconds (zero when absent or negative). The host waits and renders it.
     public func triggerEventNoShow(
         events: [TriggerEvent],
         pageContext: PageContext
@@ -542,16 +561,18 @@ public class GravitySDK {
             guard let result,
                   result.data.data.first?.payload.first?.contents.contains(where: { $0.step == nil }) == true
             else { continue }
+            let accepted = GravityDataResponse(data: result.data, json: result.json,
+                delayTime: candidate.element.delayTime ?? 0)
             // Acceptance is final before notifying the host, as in Flutter. Do not
             // suspend or recheck the deadline after emitting load side effects.
             for campaign in result.data.data {
                 for payload in campaign.payload {
                     for content in payload.contents {
-                        contentEventService.sendContentLoaded(content, campaign)
+                        contentEventService.sendContentLoaded(content, campaign, delayTime: accepted.delayTime)
                     }
                 }
             }
-            return result
+            return accepted
         }
         return nil
     }
@@ -564,7 +585,7 @@ public class GravitySDK {
     }
 
     /// Same as `getContentBySelector`, plus the raw JSON of the same response,
-    /// for rendering the content yourself. Does not show anything.
+    /// for rendering the content yourself. Does not show anything. delayTime is 0.
     public func getContentBySelectorWithDetails(
         selector: String,
         pageContext: PageContext
@@ -616,7 +637,7 @@ public class GravitySDK {
     private func handleCampaignIdsResponse(
         _ response: CampaignIdsResponse,
         _ pageContext: PageContext,
-        _ viewController: UIViewController? = nil,
+        _ target: AutomaticPresentationTarget,
         request: InAppPresentationGate.Request,
         requestUser: User?,
         revision: UInt64,
@@ -630,15 +651,13 @@ public class GravitySDK {
         }
         try Task.checkCancellation()
         guard presentationGate.isCurrent(request) else { return }
-        let targetViewController: UIViewController?
-        if let viewController {
-            targetViewController = viewController
+        weak var targetViewController: UIViewController?
+        if target.wasSupplied {
+            targetViewController = target.viewController
         } else {
             targetViewController = await self.getTopViewController()
         }
-        guard let targetViewController = targetViewController else {
-            return
-        }
+        guard targetViewController != nil else { return }
 
         let sortedByPriority = response.campaigns.sorted {
             $0.priority ?? 0 > $1.priority ?? 0
@@ -682,13 +701,27 @@ public class GravitySDK {
                 return
             }
 
-            if let delayTime = campaignId.delayTime {
-                try await Task.sleep(
-                    nanoseconds: UInt64(delayTime) * 1_000_000
-                )
+            if let duration = campaignDelayNanoseconds(campaignId.delayTime) {
+                let timing = campaignDelayTiming
+                let sum = timing.now().addingReportingOverflow(duration)
+                let deadline = sum.overflow ? UInt64.max : sum.partialValue
+                while true {
+                    let now = timing.now()
+                    guard now < deadline else { break }
+                    let interval = min(deadline - now, 100_000_000)
+                    try await timing.sleep(interval)
+                    // Invalidated waits release their reservation through defer,
+                    // rather than retaining loaded content for the entire delay.
+                    guard Self._instance === self,
+                          presentationRevision.current == revision,
+                          presentationGate.isCurrent(request), !isPresentationLocked,
+                          repository.sessionManager.isCurrent(identityGeneration),
+                          targetViewController != nil else { return }
+                }
             }
 
-            guard await isViewControllerActive(targetViewController) else {
+            guard let targetViewController,
+                  await isViewControllerActive(targetViewController) else {
                 return
             }
 
@@ -845,7 +878,7 @@ public class GravitySDK {
     }
 
     /// Same as `getContentByCampaignId`, plus the raw JSON of the same response,
-    /// for rendering the content yourself. Does not show anything.
+    /// for rendering the content yourself. Does not show anything. delayTime is 0.
     public func getContentByCampaignIdWithDetails(
         _ campaignId: String,
         _ pageContext: PageContext
@@ -1343,4 +1376,15 @@ public class GravitySDK {
         }
         return true
     }
+}
+
+/// Converts a campaign delay in milliseconds for Task.sleep. Missing, zero and
+/// negative delays mean no wait; positive values saturate to the maximum supported
+/// sleep (Int64.max ns). Older supported iOS runtimes return immediately for larger
+/// nanosecond durations, so even nonoverflowing UInt64 values must be capped.
+internal func campaignDelayNanoseconds(_ delayTime: Int?) -> UInt64? {
+    guard let delayTime, delayTime > 0 else { return nil }
+    let (nanoseconds, overflow) = UInt64(delayTime).multipliedReportingOverflow(by: 1_000_000)
+    let cap = UInt64(Int64.max)
+    return overflow ? cap : min(nanoseconds, cap)
 }

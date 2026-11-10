@@ -54,6 +54,117 @@ final class HeadlessCampaignWireTests: XCTestCase {
         }
     }
 
+    @MainActor func testChosenDelayRawJSONAndNoPresentationForBothAPIs() async throws {
+        for event in [false, true] {
+            for delay: Int? in [1500, nil, 0, -3, 60000] {
+                let callbacks = HeadlessCallbackRecorder()
+                let loaded = expectation(description: "Chosen campaign load callback delivered")
+                let unexpected = expectation(description: "No extra choose or presentation callback")
+                unexpected.isInverted = true
+                try await withServer(callback: {
+                    callbacks.record($0)
+                    if $0 is ContentLoadEvent { loaded.fulfill() }
+                    else { unexpected.fulfill() }
+                }) { sdk, server in
+                    var chooseCount = 0
+                    server.observeRequests { request in
+                        if request.path == "/choose" {
+                            chooseCount += 1
+                            if chooseCount > 1 { unexpected.fulfill() }
+                        }
+                    }
+                    let host = UIViewController()
+                    let window = UIWindow(frame: UIScreen.main.bounds)
+                    window.rootViewController = host
+                    window.makeKeyAndVisible()
+                    defer { window.isHidden = true; window.rootViewController = nil }
+                    let baselineSubviews = host.view.subviews.count
+                    var id = campaign("c")
+                    if let delay { id["delayTime"] = delay }
+                    let raw: [String: Any] = ["data": content("c"), "unknown": ["keep": NSNull()]]
+                    server.setResponseHandler { request in
+                        .init(json: request.path == "/choose" ? raw : ["campaigns": [id]])
+                    }
+                    // A regression that actually waits 60 seconds must fail promptly.
+                    let finished = expectation(description: "Headless fetch returns without campaign delay")
+                    let pending = Task {
+                        defer { finished.fulfill() }
+                        return try await fetch(sdk, event: event)
+                    }
+                    await fulfillment(of: [finished], timeout: 5)
+                    pending.cancel()
+                    let fetched = try await pending.value
+                    let result = try XCTUnwrap(fetched)
+                    await fulfillment(of: [loaded], timeout: 5)
+                    await fulfillment(of: [unexpected], timeout: 0.1)
+                    XCTAssertEqual(callbacks.events.count, 1)
+                    XCTAssertEqual(result.delayTime, max(0, delay ?? 0))
+                    let expected = try JSONDecoder().decode(JSONValue.self, from: JSONSerialization.data(withJSONObject: raw))
+                    XCTAssertEqual(result.json, expected)
+                    XCTAssertEqual(callbacks.events.compactMap { ($0 as? ContentLoadEvent)?.delayTime }, [result.delayTime])
+                    XCTAssertNil(host.presentedViewController)
+                    XCTAssertTrue(host.children.isEmpty)
+                    XCTAssertEqual(host.view.subviews.count, baselineSubviews)
+                    XCTAssertEqual(chosen(server), ["c"])
+                    XCTAssertEqual(server.recorded.map(\.path), [event ? "/event" : "/visit", "/choose"])
+                    // Exercise the same admission gate automatic presentation uses; this
+                    // would fail if headless accidentally reserved/presented the content.
+                    let request = sdk.presentationGate.beginRequest(location: "probe", newScreen: true)
+                    let reservation = sdk.presentationGate.reserve(campaignId: "c", request: request)
+                    XCTAssertNotNil(reservation)
+                    if let reservation { sdk.presentationGate.cancel(reservation) }
+                }
+            }
+        }
+    }
+
+    func testFallbackReturnsWinningStringDelayForBothAPIs() async throws {
+        for event in [false, true] {
+            let callbacks = HeadlessCallbackRecorder()
+            let loaded = expectation(description: "Chosen campaign load callback delivered")
+            try await withServer(callback: {
+                callbacks.record($0)
+                if $0 is ContentLoadEvent { loaded.fulfill() }
+            }) { sdk, server in
+                let ids: [[String: Any]] = [
+                    ["campaignId": "winner", "priority": "1.9", "delayTime": " 1500.0 "],
+                    ["campaignId": "missing-root", "priority": 10, "delayTime": 9000],
+                    ["campaignId": "failed", "priority": 5, "delayTime": 8000]
+                ]
+                let winner = content("winner")
+                let missing = content("missing-root", step: 1)
+                server.setResponseHandler { request in
+                    if request.path != "/choose" { return .init(json: ["campaigns": ids]) }
+                    let id = (request.body["data"] as? [[String: Any]])?.first?["campaignId"] as? String
+                    if id == "failed" { return .init(json: [:], status: 500) }
+                    return .init(json: ["data": id == "winner" ? winner : missing])
+                }
+                let response = try await fetch(sdk, event: event)
+                XCTAssertEqual(response?.delayTime, 1500)
+                XCTAssertEqual(response?.data.data.first?.payload.first?.contents.first?.contentId, "winner")
+                XCTAssertEqual(chosen(server), ["missing-root", "failed", "winner"])
+                await fulfillment(of: [loaded], timeout: 5)
+                XCTAssertEqual(callbacks.events.compactMap { ($0 as? ContentLoadEvent)?.delayTime }, [1500])
+            }
+        }
+    }
+
+    func testDirectDetailsAlwaysHaveZeroDelay() async throws {
+        try await withServer { sdk, server in
+            let raw: [String: Any] = ["data": content("c"), "delayTime": 9000]
+            server.setResponseHandler { _ in .init(json: raw) }
+            let byId = await sdk.getContentByCampaignIdWithDetails("c", page)
+            let bySelector = await sdk.getContentBySelectorWithDetails(selector: "selector", pageContext: page)
+            XCTAssertEqual(byId?.delayTime, 0)
+            XCTAssertEqual(bySelector?.delayTime, 0)
+            XCTAssertEqual(GravityDataResponse(data: 1, json: .null).delayTime, 0)
+            XCTAssertEqual(GravityDataResponse(data: 1, json: .null, delayTime: -1).delayTime, 0)
+            let campaign = try XCTUnwrap(byId?.data.data.first)
+            let content = try XCTUnwrap(campaign.payload.first?.contents.first)
+            XCTAssertEqual(ContentLoadEvent(content: content, campaign: campaign, delayTime: -1).delayTime, 0)
+        }
+    }
+
     func testResetAndRestoreDiscardPendingTrackingAndChooseForBothAPIs() async throws {
         for event in [false, true] {
             for duringChoose in [false, true] {

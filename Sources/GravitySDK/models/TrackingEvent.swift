@@ -10,9 +10,15 @@ public class TrackingEvent {
 
 public class ContentLoadEvent: TrackingEvent {
     public let content: CampaignContent
-    
-    public init(content: CampaignContent, campaign: Campaign) {
+    /// Campaign delay in milliseconds only for content returned by trackViewNoShow
+    /// or triggerEventNoShow, matching GravityDataResponse.delayTime for the host to wait.
+    /// Zero for auto-shown campaigns and getContent calls, even when the SDK itself
+    /// waits a campaign delay before automatic presentation.
+    public let delayTime: Int
+
+    public init(content: CampaignContent, campaign: Campaign, delayTime: Int = 0) {
         self.content = content
+        self.delayTime = max(0, delayTime)
         super.init(campaign: campaign)
     }
 }

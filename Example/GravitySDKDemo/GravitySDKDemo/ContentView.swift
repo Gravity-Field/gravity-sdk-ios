@@ -250,28 +250,51 @@ private struct HeadlessCampaignDemo: View {
     @State private var status = "Fetch a campaign to apply its content to your own view."
     @State private var reported = false
     @State private var reportedVisible = false
-    @State private var isLoading = false
+    @State private var pending: Task<Void, Never>?
+    @State private var requestID = UUID()
 
-    @MainActor private func fetch(event: Bool) async {
-        guard !isLoading else { return }
-        isLoading = true
-        defer { isLoading = false }
+    @MainActor private func start(event: Bool) {
+        pending?.cancel()
+        let id = UUID()
+        requestID = id
         response = nil
         reported = false
         reportedVisible = false
+        status = "Loading campaign…"
+        pending = Task { await fetch(event: event, id: id) }
+    }
+
+    @MainActor private func fetch(event: Bool, id: UUID) async {
         let page = PageContext(type: .homepage, data: [], location: "homepage")
         do {
+            let loaded: GravityDataResponse<ContentResponse>?
             if event {
-                response = try await GravitySDK.instance.triggerEventNoShow(
+                loaded = try await GravitySDK.instance.triggerEventNoShow(
                     events: [CustomEvent(type: "tap", name: "Headless demo")], pageContext: page
                 )
             } else {
-                response = try await GravitySDK.instance.trackViewNoShow(pageContext: page)
+                loaded = try await GravitySDK.instance.trackViewNoShow(pageContext: page)
             }
-            status = response == nil ? "No content returned." : "Campaign fetched."
+            try Task.checkCancellation()
+            guard requestID == id else { return }
+            guard let loaded else {
+                status = "No campaign."
+                return
+            }
+            status = "Campaign loaded. Waiting \(loaded.delayTime) ms before rendering…"
+            // The app owns the wait and rendering. Duration avoids overflow when
+            // converting a large millisecond delay to nanoseconds.
+            if loaded.delayTime > 0 {
+                try await Task.sleep(for: .milliseconds(loaded.delayTime))
+            }
+            try Task.checkCancellation()
+            guard requestID == id else { return }
+            response = loaded
+            status = "Campaign ready. Delay: \(loaded.delayTime) ms."
         } catch is CancellationError {
-            status = "Cancelled."
+            // A replacement request or disappearing view owns subsequent state.
         } catch {
+            guard requestID == id, !Task.isCancelled else { return }
             status = error.localizedDescription
         }
     }
@@ -279,13 +302,11 @@ private struct HeadlessCampaignDemo: View {
     var body: some View {
         VStack(spacing: 20) {
             Button("Track view and fetch without showing") {
-                Task { await fetch(event: false) }
+                start(event: false)
             }
-            .disabled(isLoading)
             Button("Trigger event and fetch without showing") {
-                Task { await fetch(event: true) }
+                start(event: true)
             }
-            .disabled(isLoading)
             Text(status)
             if let response,
                let campaign = response.data.data.first,
@@ -326,5 +347,12 @@ private struct HeadlessCampaignDemo: View {
         }
         .padding()
         .navigationTitle("Own campaign rendering")
+        .onDisappear {
+            pending?.cancel()
+            pending = nil
+            requestID = UUID()
+            response = nil
+            status = "Fetch a campaign to apply its content to your own view."
+        }
     }
 }

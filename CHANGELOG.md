@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Expose the chosen campaign’s `delayTime` in NoShow responses and load callbacks for host-owned waiting and rendering; accept fractional numbers and numeric strings (truncated toward zero) for campaign priorities and delays; invalid values are ignored and no longer fail the whole /visit or /event response.
+- Prevent auto-show crashes on negative or very large integer campaign delays; negative delays mean no wait and large delays saturate to the maximum supported sleep; delayed auto-show stops when the screen, user or presentation lock changes, releasing its reservation.
+
 ### Choose requests
 
 - Send content settings under `option` in all choose requests.
