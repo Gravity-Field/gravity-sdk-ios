@@ -43,6 +43,27 @@ extension SDKSingletonTests {
             _ = await GravitySDK.instance.getContentByGroupSelector(groupSelector: "grp", pageContext: pageContext)
         }
 
+        @Test func allThreeChooseVariantsEncodeContentSettingsUnderOption() async throws {
+            try await withServer { server, _ in
+                GravitySDK.instance.setOptions(options: nil,
+                    contentSettings: ContentSettings(skusOnly: true, fields: ["sku", "price"]),
+                    proxyUrl: server.url)
+                await getContentAllWays()
+
+                let requests = chooseRequests(server)
+                #expect(requests.count == 3)
+                for (request, identifier) in zip(requests, ["selector", "campaignId", "group"]) {
+                    let data = try #require((request.body["data"] as? [[String: Any]])?.first)
+                    #expect(data[identifier] != nil)
+                    #expect(data["options"] == nil)
+                    let option = try #require(data["option"] as? [String: Any])
+                    #expect(option["skusOnly"] as? Bool == true)
+                    #expect(option["fields"] as? [String] == ["sku", "price"])
+                    #expect(request.body["options"] != nil)
+                }
+            }
+        }
+
         @Test func allThreeChooseVariantsCarryTheCustomUser() async throws {
             try await withServer { server, _ in
                 GravitySDK.instance.setUser(userId: "user-A", sessionId: "session-A")

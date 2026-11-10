@@ -162,7 +162,7 @@ final class HeadlessCampaignWireTests: XCTestCase {
                 for (index, request) in requests.enumerated() {
                     let options = request.body["options"] as? [String: Any]
                     let data = (request.body["data"] as? [[String: Any]])?.first
-                    let settings = data?["options"] as? [String: Any]
+                    let settings = data?["option"] as? [String: Any]
                     XCTAssertEqual(options?["isReturnCounter"] as? Bool, index == 0)
                     XCTAssertEqual(options?["isImplicitImpression"] as? Bool, index != 0)
                     XCTAssertEqual(settings?["skusOnly"] as? Bool, index == 0)

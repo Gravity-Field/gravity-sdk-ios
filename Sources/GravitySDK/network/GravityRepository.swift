@@ -558,16 +558,31 @@ internal class GravityRepository {
     private struct ByCampaignIdData: ContentRequestData {
         let campaignId: String
         let options: ContentSettings
+
+        enum CodingKeys: String, CodingKey {
+            case campaignId
+            case options = "option"
+        }
     }
 
     private struct BySelectorData: ContentRequestData {
         let selector: String
         let options: ContentSettings
+
+        enum CodingKeys: String, CodingKey {
+            case selector
+            case options = "option"
+        }
     }
 
     private struct ByGroupData: ContentRequestData {
         let group: String
         let options: ContentSettings
+
+        enum CodingKeys: String, CodingKey {
+            case group
+            case options = "option"
+        }
     }
 }
 
