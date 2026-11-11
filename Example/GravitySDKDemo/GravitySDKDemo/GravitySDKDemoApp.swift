@@ -25,6 +25,8 @@ struct GravitySDKDemoApp: App {
             logLevel: LogLevel.debug,
             inAppPreparation: ReviewPromptCoordinator.shared.integration.preparation()
         )
+        GravitySDK.instance.setAssistantProductBlockBuilder(AssistantProductBlockBuilderImpl())
+        GravitySDK.instance.setAssistantActionHandler(AssistantActionHandlerImpl.shared)
         GravitySDK.instance.setLogListener { logLevel, message in
             print("GravitySDK \(logLevel): \(message)")
         }

@@ -187,6 +187,10 @@ public class GravitySDK {
         }
     }
     private var options = Options()
+
+    /// Request options for SDK modules that send their own requests, such as assistant analytics.
+    internal var currentOptions: Options { options }
+
     private var contentSettings = ContentSettings()
     internal var logListener: GravityLogListener?
     internal var proxyUrl: String?
@@ -209,6 +213,24 @@ public class GravitySDK {
     }
     private var presentationLockListener: ((Bool) -> Void)?
 
+    /// Lock held while the assistant is open; independent of the app's `lockPresentation()`.
+    private var _lockPresentationByAssistant = false
+    private var lockPresentationByAssistant: Bool {
+        get {
+            presentationLock.lock()
+            defer { presentationLock.unlock() }
+            return _lockPresentationByAssistant
+        }
+        set {
+            presentationLock.lock()
+            defer { presentationLock.unlock() }
+            _lockPresentationByAssistant = newValue
+        }
+    }
+
+    @MainActor private var assistantPresentation: AssistantHostingController<GravityAssistantContent>?
+    private let assistantController = AssistantController()
+
     private let repository = GravityRepository.instance
     private let contentEventService = ContentEventService.instance
     private let productEventService = ProductEventService.instance
@@ -228,12 +250,22 @@ public class GravitySDK {
     public func setUser(userId: String, sessionId: String) {
         guard checkInitialized() else { return }
 
-        presentationGate.scoped {
-            if _user?.custom != userId || _user?.ses != sessionId {
+        let changed: Bool = presentationGate.scoped {
+            let changed = _user?.custom != userId || _user?.ses != sessionId
+            if changed {
                 presentationGate.reset()
                 presentationRevision.invalidate()
             }
             _user = User(custom: userId, ses: sessionId)
+            return changed
+        }
+
+        guard changed else { return }
+
+        // Close before reset: close analytics needs the dialog context that reset() erases.
+        Task { @MainActor in
+            closeAssistant()
+            assistantController.reset()
         }
     }
 
@@ -480,7 +512,7 @@ public class GravitySDK {
                 return
             }
 
-            if isPresentationLocked {
+            if isPresentationLocked || lockPresentationByAssistant {
                 GravityLogger.i(
                     prefix: Self.TAG,
                     "Presentation is locked, skipped content for campaign \(campaignId.campaignId)"
@@ -541,8 +573,147 @@ public class GravitySDK {
 
     @MainActor private func canPresent(_ viewController: UIViewController, revision: UInt64) -> Bool {
         GravitySDK.instance === self && presentationRevision.canPresent(expected: revision,
-            active: isViewControllerActive(viewController), locked: isPresentationLocked,
+            active: isViewControllerActive(viewController),
+            locked: isPresentationLocked || lockPresentationByAssistant,
             cancelled: Task.isCancelled)
+    }
+
+    @MainActor
+    public func setAssistantProductBlockBuilder(_ builder: AssistantProductBlockBuilder) {
+        guard checkInitialized() else { return }
+
+        assistantController.productBlockBuilder = builder
+    }
+
+    @MainActor
+    public func setAssistantActionHandler(_ handler: AssistantActionHandler) {
+        guard checkInitialized() else { return }
+
+        assistantController.actionHandler = handler
+    }
+
+    /// Loads the assistant start screen for the given page.
+    /// Show the assistant entry point only after this returns `.ready`.
+    @MainActor
+    public func prepareAssistant(
+        assistantSelector: String,
+        pageContext: PageContext,
+        timeoutMillis: Int64 = 10_000
+    ) async -> AssistantPrepareResult {
+        guard checkInitialized() else {
+            return .failure(AssistantError(
+                code: .invalidConfiguration,
+                message: "GravitySDK is not initialized"
+            ))
+        }
+
+        return await assistantController.prepare(
+            assistantSelector: assistantSelector,
+            pageContext: pageContext,
+            timeoutMillis: timeoutMillis,
+            options: options,
+            contentSettings: contentSettings,
+            customerUser: user
+        )
+    }
+
+    @MainActor
+    @discardableResult
+    public func openAssistant(viewController: UIViewController? = nil) -> AssistantOpenResult {
+        guard checkInitialized() else { return .invalidPresenter }
+
+        if lockPresentationByAssistant {
+            GravityLogger.i(prefix: Self.TAG, "Assistant is already presented")
+            return .alreadyOpen
+        }
+
+        if assistantController.config == nil && assistantController.dialogState.items.isEmpty {
+            GravityLogger.i(prefix: Self.TAG, "Assistant is not prepared")
+            return .notReady
+        }
+
+        guard let presenter = viewController ?? getTopViewController(),
+              isViewControllerActive(presenter),
+              presenter.presentedViewController == nil
+        else {
+            return .invalidPresenter
+        }
+
+        let hosting = AssistantHostingController(
+            rootView: GravityAssistantContent(
+                controller: assistantController,
+                onClose: { [weak self] in self?.closeAssistant() }
+            )
+        )
+        hosting.modalPresentationStyle = .fullScreen
+
+        hosting.onDismissed = { [weak self] in
+            guard let self else { return }
+
+            // The presenter may be dismissed with the chat still open; without unlocking here,
+            // neither the assistant nor campaigns would ever be shown again.
+            if self.assistantPresentation === hosting {
+                self.assistantPresentation = nil
+                self.lockPresentationByAssistant = false
+                GravityLogger.i(prefix: Self.TAG, "Assistant overlay detached, presentation unlocked")
+            }
+
+            self.assistantController.onAssistantClosed()
+        }
+
+        assistantPresentation = hosting
+        lockPresentationByAssistant = true
+        presenter.present(hosting, animated: true)
+
+        assistantController.onAssistantOpened()
+
+        return .opened
+    }
+
+    /// Dismisses the assistant chat if it is open.
+    @MainActor
+    public func closeAssistant() {
+        closeAssistant(completion: nil)
+    }
+
+    @MainActor
+    private func closeAssistant(completion: (() -> Void)?) {
+        guard let hosting = assistantPresentation else {
+            completion?()
+            return
+        }
+
+        assistantPresentation = nil
+        lockPresentationByAssistant = false
+
+        // Track the close now, not in the dismiss completion: a following reset() would erase the dialog context.
+        hosting.onDismissed = nil
+        hosting.dismiss(animated: true, completion: completion)
+        assistantController.onAssistantClosed()
+    }
+
+    /// Reports an impression or tap on an assistant product card. A tap may close the chat
+    /// and pass the resulting action to `AssistantActionHandler`. Stale product references are rejected.
+    @MainActor
+    @discardableResult
+    public func performAssistantProductAction(
+        product: AssistantProductRef,
+        action: AssistantProductAction
+    ) -> AssistantInteractionResult {
+        guard checkInitialized() else { return .notActionable }
+
+        let plan = assistantController.planProductAction(product, action)
+        guard let assistantAction = plan.action else { return plan.result }
+
+        let handler = assistantController.actionHandler
+
+        if plan.closeChat {
+            closeAssistant { handler?.handle(assistantAction) }
+        } else {
+            handler?.handle(assistantAction)
+        }
+
+        return plan.result
     }
 
     public func sendContentEngagement(engagement: ContentEngagement) {
@@ -1039,7 +1210,7 @@ public class GravitySDK {
                 item = nil
             }
 
-            if isPresentationLocked {
+            if isPresentationLocked || lockPresentationByAssistant {
                 GravityLogger.i(
                     prefix: Self.TAG,
                     "Presentation is locked, skipped content for campaign \(campaign.payload.first?.campaignId ?? "unknown")"

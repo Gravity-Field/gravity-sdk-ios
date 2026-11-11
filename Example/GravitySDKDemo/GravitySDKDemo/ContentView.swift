@@ -7,6 +7,7 @@ struct ContentView: View {
     @State private var showInlineListDemo = false
     @State private var abButtonColor: Color?
     @State private var showReviewPromptTestConsole = false
+    @State private var showAssistantDemo = false
     @ObservedObject private var reviewPromptCoordinator = ReviewPromptCoordinator.shared
     
     var body: some View {
@@ -130,6 +131,10 @@ struct ContentView: View {
                 Button("Review Prompt Test Console") {
                     showReviewPromptTestConsole = true
                 }
+
+                Button("Assistant demo") {
+                    showAssistantDemo = true
+                }
                 
                 GravityInlineSwiftUIView(
                     selector: "homepage_inline_banner",
@@ -157,6 +162,9 @@ struct ContentView: View {
                 }
                 .navigationDestination(isPresented: $showReviewPromptTestConsole) {
                     ReviewPromptTestConsoleView()
+                }
+                .navigationDestination(isPresented: $showAssistantDemo) {
+                    AssistantDemoView()
                 }
         }
         .sheet(isPresented: Binding(
