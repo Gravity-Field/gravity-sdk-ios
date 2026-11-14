@@ -22,6 +22,7 @@
 
 ### Products grid and presentation
 
+- Track modal, fullscreen and bottom-sheet close once when their UIKit host is removed outside `dismissInApp`, preserving SDK dismissal completions.
 - Add product grids with public `GridSettings`, `Style.gridSettings` and a `gridSettings` parameter in `Style.init`; fall back to legacy `gridColumns`, with 2 columns and spacing 8 by default.
 - Render square grid cards with `style.padding` and 1–12 columns; invalid settings fall back to valid `gridColumns`, otherwise 2.
 - Accept numeric and `px` strings for dimensions of all elements, including size, padding, margin and corner radius.

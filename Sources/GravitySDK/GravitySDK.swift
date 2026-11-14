@@ -1022,7 +1022,8 @@ public class GravitySDK {
             item: item
         )
 
-        let hostingController = UIHostingController(rootView: fullScreenView)
+        let hostingController = InAppHostingController(rootView: fullScreenView)
+        hostingController.onExternalRemoval = { presentation.removedExternally() }
         presentedController = hostingController
         hostingController.modalPresentationStyle = .fullScreen
 
@@ -1065,7 +1066,8 @@ public class GravitySDK {
             item: item
         )
 
-        let hostingController = UIHostingController(rootView: modalView)
+        let hostingController = InAppHostingController(rootView: modalView)
+        hostingController.onExternalRemoval = { presentation.removedExternally() }
         presentedController = hostingController
         hostingController.modalPresentationStyle = .overFullScreen
         hostingController.modalTransitionStyle = .crossDissolve
@@ -1130,7 +1132,8 @@ public class GravitySDK {
             item: item
         )
 
-        let hostingController = UIHostingController(rootView: fullScreenView)
+        let hostingController = InAppHostingController(rootView: fullScreenView)
+        hostingController.onExternalRemoval = { presentation.removedExternally() }
         presentedController = hostingController
         hostingController.modalPresentationStyle = .overFullScreen
         hostingController.view.backgroundColor = .clear
