@@ -20,9 +20,17 @@ public class GravityInlineView: UIView {
         setupConstraints()
     }
 
-    public convenience init(selector: String) {
+    /// Recommendation rules sent with this placement's content request, for example
+    /// the catalog filters the user applied. Changing them reloads the content.
+    public var rules: [RtRule]? {
+        get { pageContextProvider.rules }
+        set { pageContextProvider.provide(rules: newValue) }
+    }
+
+    public convenience init(selector: String, rules: [RtRule]? = nil) {
         self.init(frame: .zero)
         self.selector = selector
+        self.rules = rules
     }
 
     public func initialize(pageContext: PageContext) {
@@ -97,10 +105,16 @@ public class GravityInlineView: UIView {
 
 internal class PageContextProvider: ObservableObject {
     @Published var pageContext: PageContext?
+    @Published private(set) var rules: [RtRule]?
 
     func provide(_ pageContext: PageContext) {
         guard self.pageContext != pageContext else { return }
         self.pageContext = pageContext
+    }
+
+    func provide(rules: [RtRule]?) {
+        guard self.rules != rules else { return }
+        self.rules = rules
     }
 }
 
@@ -205,29 +219,39 @@ private struct GravityInlineContentView: View {
         .background(InlinePlacementLifecycle(onMount: {
             contentState.appear()
             if let pageContext = pageContextProvider.pageContext {
-                loadContent(pageContext: pageContext)
+                loadContent(pageContext: pageContext, rules: pageContextProvider.rules)
             }
         }, onUnmount: { contentState.disappear() }))
         .onReceive(pageContextProvider.$pageContext.dropFirst()) { newContext in
             if let pageContext = newContext {
                 contentState.pageContextChanged()
-                loadContent(pageContext: pageContext)
+                loadContent(pageContext: pageContext, rules: pageContextProvider.rules)
+            }
+        }
+        .onReceive(pageContextProvider.$rules.dropFirst()) { newRules in
+            // New filters make the shown content stale, unlike a new page context.
+            // Published emits before the property changes, so use the emitted value.
+            contentState.clear()
+            if let pageContext = pageContextProvider.pageContext {
+                loadContent(pageContext: pageContext, rules: newRules)
             }
         }
     }
 
-    private func loadContent(pageContext: PageContext) {
+    private func loadContent(pageContext: PageContext, rules: [RtRule]?) {
         guard let load = contentState.begin() else { return }
         let sdk = GravitySDK.instance
         Task {
-            let result = await sdk.getContentBySelector(selector: selector, pageContext: pageContext)
+            let result = await sdk.getContentBySelector(
+                selector: selector, pageContext: pageContext, rules: rules)
             await MainActor.run {
                 let campaign = result?.data.first
                 let content = campaign?.payload.first?.contents.firstByStep()
                 let backendHeight = content?.variables?.frameUI?.container.style?.size?.height
                 let height: CGFloat? = content == nil ? 0 : backendHeight.map { CGFloat($0) }
                 if contentState.complete(load, value: campaign, height: height) {
-                    loadContent(pageContext: pageContextProvider.pageContext ?? pageContext)
+                    loadContent(pageContext: pageContextProvider.pageContext ?? pageContext,
+                                rules: pageContextProvider.rules)
                 }
             }
         }

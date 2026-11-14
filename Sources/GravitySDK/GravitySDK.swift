@@ -580,18 +580,22 @@ public class GravitySDK {
         return nil
     }
 
+    /// - Parameter rules: Recommendation rules for this request, for example the
+    ///   catalog filters the user applied. `nil` sends no rules.
     public func getContentBySelector(
         selector: String,
-        pageContext: PageContext
+        pageContext: PageContext,
+        rules: [RtRule]? = nil
     ) async -> ContentResponse? {
-        await getContentBySelectorWithDetails(selector: selector, pageContext: pageContext)?.data
+        await getContentBySelectorWithDetails(selector: selector, pageContext: pageContext, rules: rules)?.data
     }
 
     /// Same as `getContentBySelector`, plus the raw JSON of the same response,
     /// for rendering the content yourself. Does not show anything. delayTime is 0.
     public func getContentBySelectorWithDetails(
         selector: String,
-        pageContext: PageContext
+        pageContext: PageContext,
+        rules: [RtRule]? = nil
     ) async -> GravityDataResponse<ContentResponse>? {
         guard checkInitialized() else { return nil }
 
@@ -603,7 +607,8 @@ public class GravitySDK {
                 contentSettings: contentSettings,
                 customerUser: requestUser,
                 pageContext: pageContext,
-                identityGeneration: identityGeneration
+                identityGeneration: identityGeneration,
+                rules: rules
             )
         else { return nil }
 
@@ -613,9 +618,11 @@ public class GravitySDK {
         return response
     }
 
+    /// - Parameter rules: Recommendation rules for this request. `nil` sends no rules.
     public func getContentByGroupSelector(
         groupSelector: String,
-        pageContext: PageContext
+        pageContext: PageContext,
+        rules: [RtRule]? = nil
     ) async -> ContentResponse? {
         guard checkInitialized() else { return nil }
 
@@ -627,7 +634,8 @@ public class GravitySDK {
                 contentSettings: contentSettings,
                 customerUser: requestUser,
                 pageContext: pageContext,
-                identityGeneration: identityGeneration
+                identityGeneration: identityGeneration,
+                rules: rules
             )
         else { return nil }
 
@@ -877,22 +885,25 @@ public class GravitySDK {
         return presentation
     }
 
+    /// - Parameter rules: Recommendation rules for this request. `nil` sends no rules.
     public func getContentByCampaignId(
         _ campaignId: String,
-        _ pageContext: PageContext
+        _ pageContext: PageContext,
+        rules: [RtRule]? = nil
     ) async -> ContentResponse? {
-        await getContentByCampaignIdWithDetails(campaignId, pageContext)?.data
+        await getContentByCampaignIdWithDetails(campaignId, pageContext, rules: rules)?.data
     }
 
     /// Same as `getContentByCampaignId`, plus the raw JSON of the same response,
     /// for rendering the content yourself. Does not show anything. delayTime is 0.
     public func getContentByCampaignIdWithDetails(
         _ campaignId: String,
-        _ pageContext: PageContext
+        _ pageContext: PageContext,
+        rules: [RtRule]? = nil
     ) async -> GravityDataResponse<ContentResponse>? {
         let (requestUser, identityGeneration) = identitySnapshot()
         return await getContentByCampaignIdWithDetails(campaignId, pageContext,
-            requestUser: requestUser, identityGeneration: identityGeneration)
+            requestUser: requestUser, identityGeneration: identityGeneration, rules: rules)
     }
 
     private func getContentByCampaignId(
@@ -910,7 +921,8 @@ public class GravitySDK {
         _ pageContext: PageContext,
         requestUser: User?,
         identityGeneration: UInt64,
-        notifyContentLoaded: Bool = true
+        notifyContentLoaded: Bool = true,
+        rules: [RtRule]? = nil
     ) async -> GravityDataResponse<ContentResponse>? {
         guard checkInitialized() else { return nil }
 
@@ -921,7 +933,8 @@ public class GravitySDK {
                 contentSettings: contentSettings,
                 customerUser: requestUser,
                 pageContext: pageContext,
-                identityGeneration: identityGeneration
+                identityGeneration: identityGeneration,
+                rules: rules
             )
         else { return nil }
 
