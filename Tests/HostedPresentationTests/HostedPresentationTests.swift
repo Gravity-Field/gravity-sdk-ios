@@ -234,6 +234,34 @@ import UIKit
         await cleanup(root, sdk)
     }
 
+    static func cover(_ root: UIViewController, _ server: RecordingServer, method: DeliveryMethod) async {
+        cases += 1
+        let label = "cover/uncover " + String(describing: method)
+        log("START " + label)
+        server.reset(); events = []
+        let sdk = sdk(server)
+        let value = content("covered", nil, method, server.url)
+        _ = sdk.showBackendContent(root, value, Campaign())
+        _ = await wait { session(root.presentedViewController)?.hasFired == true && paths(server).count >= 2 }
+        await pause(0.2)
+        guard let host = root.presentedViewController else { check(false, label + " missing host"); return }
+        let cover = UIViewController()
+        cover.view.backgroundColor = .green
+        cover.modalPresentationStyle = .fullScreen
+        await withCheckedContinuation { continuation in host.present(cover, animated: true) { continuation.resume() } }
+        await withCheckedContinuation { continuation in cover.dismiss(animated: true) { continuation.resume() } }
+        await pause(0.3)
+        check(events.filter { $0 == "impression:covered" }.count == 1, label + " one impression callback")
+        check(paths(server).filter { $0 == "/impression/covered" }.count == 1, label + " one impression URL")
+        check(!events.contains("close:covered"), label + " cover is not a close")
+        sdk.dismissInApp(contentId: prefix + "covered")
+        _ = await wait { root.presentedViewController == nil && events.contains("close:covered") }
+        _ = sdk.showBackendContent(root, value, Campaign())
+        _ = await wait { events.filter { $0 == "visible:covered" }.count == 2 }
+        check(events.filter { $0 == "impression:covered" }.count == 2, label + " reopening sends another impression")
+        await cleanup(root, sdk)
+    }
+
     static func run() async {
         guard !started else { return }; started = true
         await pause(0.5)
@@ -242,8 +270,8 @@ import UIKit
               let server = try? RecordingServer() else { return }
         do { try await server.start() } catch { return }
         defer { server.stop() }
-        let mode = ProcessInfo.processInfo.environment["HOSTED_TEST_MODE"] ?? "steps"
-        if mode != "cancellation" {
+        let mode = ProcessInfo.processInfo.environment["HOSTED_TEST_MODE"] ?? "all"
+        if mode != "cancellation" && mode != "impressions" {
             for from in methods {
                 for to in methods + [.snackBar] {
                     await step(root, server, from: from, to: to, close: true)
@@ -251,7 +279,12 @@ import UIKit
                 }
             }
         }
-        for reason in ["user", "invalidation", "background"] { await cancellation(root, server, reason: reason) }
+        if mode != "impressions" {
+            for reason in ["user", "invalidation", "background"] { await cancellation(root, server, reason: reason) }
+        }
+        if mode == "all" || mode == "impressions" {
+            for method in methods { await cover(root, server, method: method) }
+        }
         log("COMPLETE cases=\(cases) failures=\(failures.count)")
         let result: [String: Any] = ["cases": cases, "failures": failures, "os": UIDevice.current.systemVersion]
         if let data = try? JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys]) {

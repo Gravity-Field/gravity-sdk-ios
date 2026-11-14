@@ -36,6 +36,7 @@ struct GravityFullScreenContent: View {
         frameUi?.close
     }
 
+    @State private var hasSentImpression = false
     @State private var contentHeight: CGFloat = 0
 
     var body: some View {
@@ -83,6 +84,8 @@ struct GravityFullScreenContent: View {
         }
         .ignoresSafeArea(.container, edges: .bottom)
         .onAppear {
+            guard !hasSentImpression else { return }
+            hasSentImpression = true
             ContentEventService.instance.sendContentImpression(content, campaign)
         }
     }

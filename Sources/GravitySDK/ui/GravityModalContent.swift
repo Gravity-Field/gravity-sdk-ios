@@ -8,6 +8,7 @@ struct GravityModalContent: View {
     let onDismiss: () -> Void
     var item: Item? = nil
 
+    @State private var hasSentImpression = false
     @State private var contentHeight: CGFloat = 0
 
     private var frameUi: FrameUI? {
@@ -110,6 +111,8 @@ struct GravityModalContent: View {
             )
         }
         .onAppear {
+            guard !hasSentImpression else { return }
+            hasSentImpression = true
             ContentEventService.instance.sendContentImpression(content, campaign)
         }
     }

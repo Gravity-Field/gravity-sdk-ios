@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Build an isolated app host and run real UIKit presentation regressions.
-Usage: python3 scripts/test-hosted-presentations.py SIMULATOR_UUID OUTPUT_DIR [steps|cancellation]
+Usage: python3 scripts/test-hosted-presentations.py SIMULATOR_UUID OUTPUT_DIR [all|steps|cancellation|impressions]
 The supplied simulator must already be booted. Nothing outside loopback is allowed.
 """
 import json
@@ -13,7 +13,7 @@ import sys
 import time
 
 sim, output = sys.argv[1:3]
-mode = sys.argv[3] if len(sys.argv) > 3 else 'steps'
+mode = sys.argv[3] if len(sys.argv) > 3 else 'all'
 repo = Path(__file__).resolve().parents[1]
 out = Path(output).resolve()
 out.mkdir(parents=True, exist_ok=True)

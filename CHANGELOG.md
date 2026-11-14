@@ -24,6 +24,7 @@
 
 - Ignore non-finite dimensions in server styles to prevent invalid layout and product-row rendering crashes.
 - Parse legacy `gridColumns` as numeric or `px` dimensions, validating 1–12 before truncating fractional values.
+- Send modal, fullscreen and bottom-sheet impressions once per showing, including when the host covers and uncovers the view.
 - Wait for modal dismissal before opening the next step; cancel stale transitions when the user, presentation state or foreground activity changes.
 - Replace the current modal, fullscreen or bottom sheet with the next `open_step` step regardless of `closeOnClick`, matching Flutter; the replaced step sends no close, the showing keeps one visible impression, and one close is tracked when the last step closes.
 - Omit modal, fullscreen and bottom-sheet close tracking before the first confirmed content frame, including external UIKit removal; missing WRIMP URLs do not suppress an appeared close.

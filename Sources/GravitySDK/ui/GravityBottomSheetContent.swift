@@ -71,6 +71,7 @@ struct GravityBottomSheetContent: View {
     }
 
     @State private var showSheet = false
+    @State private var hasSentImpression = false
     @State private var contentHeight: CGFloat = 0
 
     var body: some View {
@@ -149,7 +150,10 @@ struct GravityBottomSheetContent: View {
                 onBindClose {
                     showSheet = false
                 }
-                ContentEventService.instance.sendContentImpression(content, campaign)
+                if !hasSentImpression {
+                    hasSentImpression = true
+                    ContentEventService.instance.sendContentImpression(content, campaign)
+                }
                 showSheet = true
             }
     }
