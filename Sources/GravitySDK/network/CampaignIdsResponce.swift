@@ -37,10 +37,10 @@ struct CampaignId: Codable {
 private extension KeyedDecodingContainer {
     /// Optional campaign metadata must not invalidate the campaign list.
     func tolerantInteger(forKey key: Key) -> Int? {
-        if let integer = try? decode(Int.self, forKey: key) { return integer }
         if let string = try? decode(String.self, forKey: key) {
             return exactCampaignInteger(string)
         }
+        if let integer = try? decode(Int.self, forKey: key) { return integer }
         guard let number = try? decode(Double.self, forKey: key) else { return nil }
         guard number.isFinite else { return nil }
         if number >= Double(Int.max) { return Int.max }
