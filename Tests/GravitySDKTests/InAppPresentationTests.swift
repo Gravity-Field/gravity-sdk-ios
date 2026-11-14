@@ -65,4 +65,22 @@ final class InAppPresentationTests: XCTestCase {
         XCTAssertEqual(completions, 1)
     }
 
+    func testOpenCampaignIsTrackedUntilDismissalCompletes() {
+        let registry = InAppPresentationRegistry()
+        var finish: ((Bool) -> Void)?
+        weak var registered: InAppPresentation?
+        let a = InAppPresentation(performDismiss: { finish = $0 }, didDismiss: { _ in
+            registry.remove(registered, contentId: "A1")
+        })
+        registered = a
+        registry.register(a, contentId: "A1", campaignId: "campaign-a")
+        XCTAssertTrue(registry.contains(contentId: "A1"))
+        XCTAssertTrue(registry.containsCampaign("campaign-a"))
+        XCTAssertFalse(registry.containsCampaign("campaign-b"))
+        a.close()
+        XCTAssertTrue(registry.containsCampaign("campaign-a"), "closing in-app still occupies its campaign")
+        finish?(true)
+        XCTAssertFalse(registry.contains(contentId: "A1"))
+        XCTAssertFalse(registry.containsCampaign("campaign-a"))
+    }
 }

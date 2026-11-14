@@ -43,13 +43,27 @@ internal final class InAppPresentation {
 internal final class InAppPresentationRegistry {
     private final class Entry {
         weak var presentation: InAppPresentation?
-        init(_ presentation: InAppPresentation) { self.presentation = presentation }
+        let campaignId: String?
+        init(_ presentation: InAppPresentation, campaignId: String?) {
+            self.presentation = presentation
+            self.campaignId = campaignId
+        }
     }
     private var entries: [String: Entry] = [:]
 
-    func register(_ presentation: InAppPresentation, contentId: String) {
+    /// True while this content is mounted, until its dismissal completes.
+    func contains(contentId: String) -> Bool {
+        entries[contentId]?.presentation != nil
+    }
+
+    /// True while any content of this campaign is mounted, until its dismissal completes.
+    func containsCampaign(_ campaignId: String) -> Bool {
+        entries.values.contains { $0.campaignId == campaignId && $0.presentation != nil }
+    }
+
+    func register(_ presentation: InAppPresentation, contentId: String, campaignId: String? = nil) {
         entries = entries.filter { $0.value.presentation != nil }
-        entries[contentId] = Entry(presentation)
+        entries[contentId] = Entry(presentation, campaignId: campaignId)
     }
 
     func remove(_ presentation: InAppPresentation?, contentId: String) {
@@ -70,8 +84,11 @@ internal final class InAppPresentationRegistry {
 import UIKit
 import SwiftUI
 
+/// Marks a controller that hosts an SDK modal, fullscreen or bottom sheet.
+internal protocol GravityInAppHost: UIViewController {}
+
 /// Observes host removal while leaving SDK-owned dismissal completion in charge.
-internal final class InAppHostingController<Content: View>: UIHostingController<Content> {
+internal final class InAppHostingController<Content: View>: UIHostingController<Content>, GravityInAppHost {
     var onExternalRemoval: (() -> Void)?
     private var hasAppeared = false
 

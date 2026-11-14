@@ -262,6 +262,120 @@ import UIKit
         await cleanup(root, sdk)
     }
 
+    static func contentJSON(_ id: String, _ step: Int, _ method: DeliveryMethod, _ base: String) -> [String: Any] {
+        let id = prefix + id
+        let wire: String
+        switch method {
+        case .fullScreen: wire = "fullscreen"
+        case .bottomSheet: wire = "bottom_sheet"
+        default: wire = "modal"
+        }
+        return ["contentId": id, "deliveryMethod": wire, "contentType": "native", "step": step,
+                "variables": ["frameUI": ["container": [String: Any]()],
+                              "elements": [["type": "text", "text": "Stacked \(id)"]],
+                              "onImpression": ["action": "impression"], "onClose": ["action": "close"]],
+                "events": [["type": "impression", "urls": [base + "/impression/" + id]],
+                           ["type": "visible_impression", "urls": [base + "/visible/" + id]],
+                           ["type": "close", "urls": [base + "/close/" + id]],
+                           ["type": "open_step", "urls": [base + "/openStep/" + id]]]]
+    }
+
+    /// A different campaign returned while an SDK in-app is open is presented above it;
+    /// the same campaign is refused until its in-app is dismissed.
+    static func stacked(_ root: UIViewController, _ server: RecordingServer, below: DeliveryMethod,
+                        above: DeliveryMethod, closeBelowFirst: Bool) async {
+        cases += 1
+        let label = "stacked \(below) under \(above) closeBelowFirst=\(closeBelowFirst)"
+        log("START " + label)
+        server.reset(); events = []
+        let sdk = sdk(server)
+        let campaignA = prefix + "campaign-a", campaignB = prefix + "campaign-b"
+        let contents: [String: [[String: Any]]] = [
+            campaignA: [contentJSON("a", 0, below, server.url)],
+            campaignB: [contentJSON("b", 0, above, server.url), contentJSON("b2", 2, above, server.url)],
+        ]
+        let lock = NSLock()
+        var next = campaignA
+        func choose(_ campaign: String) { lock.lock(); next = campaign; lock.unlock() }
+        server.setResponseHandler { request in
+            let user: [String: Any] = ["uid": "hosted-uid", "ses": "hosted-ses"]
+            if request.path.hasSuffix("/visit") || request.path.hasSuffix("/event") {
+                lock.lock(); let campaign = next; lock.unlock()
+                return .init(json: ["user": user, "campaigns": [["campaignId": campaign, "priority": 1]]])
+            }
+            if request.path.hasSuffix("/choose") {
+                let campaign = (request.body["data"] as? [[String: Any]])?.first?["campaignId"] as? String ?? ""
+                return .init(json: ["user": user, "data": [["payload": [["campaignId": campaign, "experienceId": "e",
+                    "variationId": "v", "decisionId": "d", "contents": contents[campaign] ?? []]]]]])
+            }
+            return .init(json: [:])
+        }
+        func chooses() -> Int { server.recorded.filter { $0.path.hasSuffix("/choose") }.count }
+        func count(_ event: String) -> Int { events.filter { $0 == event }.count }
+        let page = PageContext(type: .other, data: [], location: "/stacked")
+        let trigger = [TriggerEvent(type: "stacked", name: "stacked", customProps: nil, eventTime: nil)]
+
+        sdk.trackView(pageContext: page, viewController: root)
+        let first = await wait(5) { id(root.presentedViewController) == "a" && root.presentedViewController?.isBeingPresented == false
+            && events.contains("visible:a") && sdk.visibleImpressionDelivery.store?.entries.isEmpty == true }
+        check(first, label + " first campaign shown and acknowledged")
+        guard first, let below = root.presentedViewController else { await cleanup(root, sdk); return }
+
+        sdk.triggerEvent(events: trigger, pageContext: page, viewController: root)
+        _ = await wait(5) { chooses() >= 2 }
+        await pause(0.8)
+        check(chooses() == 2, label + " same campaign was chosen again (\(chooses()))")
+        check(root.presentedViewController === below && below.presentedViewController == nil,
+              label + " same campaign refused while open")
+        check(count("impression:a") == 1, label + " one impression for the open campaign \(events)")
+
+        choose(campaignB)
+        sdk.triggerEvent(events: trigger, pageContext: page, viewController: root)
+        let stacked = await wait(5) { id(below.presentedViewController) == "b" && below.presentedViewController?.isBeingPresented == false
+            && events.contains("visible:b") }
+        check(stacked, label + " different campaign presented above the open one (top=\(id(below.presentedViewController) ?? "none"))")
+        guard stacked, let above = below.presentedViewController else { await cleanup(root, sdk); return }
+        check(!events.contains("close:a"), label + " covering is not a close")
+
+        if closeBelowFirst {
+            var result: Bool?
+            sdk.dismissInApp(contentId: prefix + "a") { result = $0 }
+            let closed = await wait(5) { result != nil && root.presentedViewController == nil
+                && events.contains("close:a") && events.contains("close:b") }
+            check(closed && result == true, label + " dismissing the lower in-app closes the stack (result=\(String(describing: result)))")
+            check(above.presentingViewController == nil, label + " upper in-app physically removed")
+        } else {
+            // A step of the upper campaign keeps working above the lower one.
+            click(above, OnClickModel(action: .openStep, step: 2, closeOnClick: true))
+            let stepped = await wait(5) { id(below.presentedViewController) == "b2" && events.contains("impression:b2") }
+            check(stepped, label + " upper campaign step opened above the lower one")
+            var result: Bool?
+            sdk.dismissInApp(contentId: prefix + "b2") { result = $0 }
+            let closed = await wait(5) { result != nil && below.presentedViewController == nil && events.contains("close:b2") }
+            check(closed && result == true, label + " upper in-app closed")
+            await pause(0.3)
+            check(root.presentedViewController === below && !events.contains("close:a"),
+                  label + " lower in-app stays open after the upper one closes")
+            var lower: Bool?
+            sdk.dismissInApp(contentId: prefix + "a") { lower = $0 }
+            _ = await wait(5) { lower != nil && root.presentedViewController == nil && events.contains("close:a") }
+            check(lower == true, label + " lower in-app closes afterwards")
+        }
+        await pause(0.3)
+        // A replaced step is not a close: the upper showing closes once, from its last step.
+        let upper = closeBelowFirst ? "b" : "b2"
+        for event in ["impression:a", "visible:a", "close:a", "impression:b", "visible:b", "close:" + upper] {
+            check(count(event) == 1, label + " exactly one \(event) in \(events)")
+        }
+        check(closeBelowFirst || (count("close:b") == 0 && count("visible:b2") == 0),
+              label + " replaced step sends no close or second visible impression \(events)")
+        let wire = paths(server)
+        for path in ["/impression/a", "/visible/a", "/close/a", "/impression/b", "/visible/b", "/close/" + upper] {
+            check(wire.filter { $0 == path }.count == 1, label + " exactly one \(path) in \(wire)")
+        }
+        await cleanup(root, sdk)
+    }
+
     static func run() async {
         guard !started else { return }; started = true
         await pause(0.5)
@@ -271,7 +385,7 @@ import UIKit
         do { try await server.start() } catch { return }
         defer { server.stop() }
         let mode = ProcessInfo.processInfo.environment["HOSTED_TEST_MODE"] ?? "all"
-        if mode != "cancellation" && mode != "impressions" {
+        if mode != "cancellation" && mode != "impressions" && mode != "stacked" {
             for from in methods {
                 for to in methods + [.snackBar] {
                     await step(root, server, from: from, to: to, close: true)
@@ -279,11 +393,20 @@ import UIKit
                 }
             }
         }
-        if mode != "impressions" {
+        if mode != "impressions" && mode != "stacked" {
             for reason in ["user", "invalidation", "background"] { await cancellation(root, server, reason: reason) }
         }
         if mode == "all" || mode == "impressions" {
             for method in methods { await cover(root, server, method: method) }
+        }
+        if mode == "all" || mode == "stacked" {
+            for below in methods {
+                for above in methods {
+                    for closeBelowFirst in [false, true] {
+                        await stacked(root, server, below: below, above: above, closeBelowFirst: closeBelowFirst)
+                    }
+                }
+            }
         }
         log("COMPLETE cases=\(cases) failures=\(failures.count)")
         let result: [String: Any] = ["cases": cases, "failures": failures, "os": UIDevice.current.systemVersion]

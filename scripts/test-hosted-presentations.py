@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Build an isolated app host and run real UIKit presentation regressions.
-Usage: python3 scripts/test-hosted-presentations.py SIMULATOR_UUID OUTPUT_DIR [all|steps|cancellation|impressions]
+Usage: python3 scripts/test-hosted-presentations.py SIMULATOR_UUID OUTPUT_DIR [all|steps|cancellation|impressions|stacked]
 The supplied simulator must already be booted. Nothing outside loopback is allowed.
 """
 import json
