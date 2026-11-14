@@ -114,7 +114,12 @@ public struct Style: Decodable, Equatable {
         positioned = try? container.decodeIfPresent(GravityPositioned.self, forKey: .positioned)
         weight = try? container.decodeIfPresent(Float.self, forKey: .weight)
         productContainerType = try? container.decodeIfPresent(ProductContainerType.self, forKey: .productContainerType)
-        gridColumns = try? container.decodeIfPresent(Int.self, forKey: .gridColumns)
+        if let columns = try? container.decodeOptionalDimension(forKey: .gridColumns),
+           columns.isFinite, (1...12).contains(columns) {
+            gridColumns = Int(columns)
+        } else {
+            gridColumns = nil
+        }
         rowSpacing = try? container.decodeOptionalDimension(forKey: .rowSpacing)
         gridSettings = try? container.decodeIfPresent(GridSettings.self, forKey: .gridSettings)
     }
@@ -349,11 +354,13 @@ extension KeyedDecodingContainer {
 
     func decodeOptionalDimension(forKey key: K) throws -> Double? {
         if let value = try? self.decode(Double.self, forKey: key) {
-            return value
+            return value.isFinite ? value : nil
         } else if let value = try? self.decode(Int.self, forKey: key) {
             return Double(value)
         } else if let value = try? self.decode(String.self, forKey: key) {
-            return Double(value.replacingOccurrences(of: "px", with: "").trimmingCharacters(in: .whitespacesAndNewlines))
+            guard let dimension = Double(value.replacingOccurrences(of: "px", with: "").trimmingCharacters(in: .whitespacesAndNewlines)),
+                  dimension.isFinite else { return nil }
+            return dimension
         }
         return nil
     }

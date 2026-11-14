@@ -22,13 +22,15 @@
 
 ### Products grid and presentation
 
+- Ignore non-finite dimensions in server styles to prevent invalid layout and product-row rendering crashes.
+- Parse legacy `gridColumns` as numeric or `px` dimensions, validating 1–12 before truncating fractional values.
 - Add product grids with public `GridSettings`, `Style.gridSettings` and a `gridSettings` parameter in `Style.init`; fall back to legacy `gridColumns`, with 2 columns and spacing 8 by default.
 - Render square grid cards with `style.padding` and 1–12 columns; invalid settings fall back to valid `gridColumns`, otherwise 2.
 - Accept numeric and `px` strings for dimensions of all elements, including size, padding, margin and corner radius.
 - Send grid product impressions once per slot after at least half of the card is visible inside the scroll viewport.
 - Scroll tall fullscreen and bottom-sheet content within the actual host bounds while preserving sheet drag dismissal.
 - Allow all fullscreen content to extend beneath the home indicator, matching Flutter.
-- Preserve the configured product-container height while product slots are absent.
+- Render nothing for product rows and grids without products, including their margin, padding and background, when the products object or its slots are missing or empty.
 - Drag a bottom sheet down from the top of its content without bouncing the nested scroll view.
 
 ### User identity

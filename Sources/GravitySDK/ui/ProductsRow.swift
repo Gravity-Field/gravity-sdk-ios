@@ -31,6 +31,10 @@ struct ProductsRow: View {
     }
 
     var body: some View {
+        if !slots.isEmpty { row }
+    }
+
+    private var row: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             LazyHStack(spacing: spacing) {
                 ForEach(slots.indices, id: \.self) { index in

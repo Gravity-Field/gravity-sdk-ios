@@ -33,7 +33,8 @@ struct GravityElements: View {
                         $0.frame(maxHeight: .infinity)
                     }
             case .productsContainer:
-                if let slots = content.products?.slots {
+                // A container without products takes no space, margin and padding included.
+                if let slots = content.products?.slots, !slots.isEmpty {
                     switch element.style.productContainerType ?? .row {
                     case .row:
                         ProductsRow(
@@ -50,8 +51,6 @@ struct GravityElements: View {
                             campaign: campaign
                         )
                     }
-                } else {
-                    Color.clear.frame(height: CGFloat(element.style.size?.height ?? 0))
                 }
             case .itemsContainer:
                 if let items = content.items {

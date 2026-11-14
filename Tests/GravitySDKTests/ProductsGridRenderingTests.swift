@@ -199,7 +199,8 @@ final class ProductsGridRenderingTests: ProductsGridTestCase {
         GravitySDK.initialize(apiKey: "", section: "")
     }
 
-    func testMissingSlotsPreserveConfiguredPlaceholderHeight() throws {
+    /// Grids and rows without products take no space despite a configured height.
+    func testMissingSlotsTakeNoSpace() throws {
         for kind in [ProductContainerType.grid, .row] {
             for missingProducts in [false, true] {
                 let style = Style(size: GravitySize(height: 173), productContainerType: kind)
@@ -210,7 +211,8 @@ final class ProductsGridRenderingTests: ProductsGridTestCase {
                     GravityElements(content: content, campaign: Campaign(), onClickCallback: { _ in })
                     Color.clear.frame(height: 19)
                 })
-                XCTAssertEqual(host.sizeThatFits(in: CGSize(width: 360, height: 2000)).height, 192, accuracy: 0.5)
+                XCTAssertEqual(host.sizeThatFits(in: CGSize(width: 360, height: 2000)).height,
+                               19, accuracy: 0.5, "\(kind) missingProducts=\(missingProducts)")
             }
         }
     }
