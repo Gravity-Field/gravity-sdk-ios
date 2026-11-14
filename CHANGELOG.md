@@ -30,6 +30,7 @@
 - Omit modal, fullscreen and bottom-sheet close tracking before the first confirmed content frame, including external UIKit removal; missing WRIMP URLs do not suppress an appeared close.
 - Track modal, fullscreen and bottom-sheet close once when their UIKit host is removed outside `dismissInApp`, preserving SDK dismissal completions.
 - Present a different campaign above an open modal, fullscreen or bottom sheet instead of skipping it; a new opening of a campaign whose in-app is still open is skipped, and `dismissInApp` for a lower in-app also closes those stacked above it, tracking each close once.
+- Send close tracking once when modal, fullscreen or bottom-sheet close buttons also trigger the configured dismissal action.
 - Add product grids with public `GridSettings`, `Style.gridSettings` and a `gridSettings` parameter in `Style.init`; fall back to legacy `gridColumns`, with 2 columns and spacing 8 by default.
 - Render square grid cards with `style.padding` and 1–12 columns; invalid settings fall back to valid `gridColumns`, otherwise 2.
 - Accept numeric and `px` strings for dimensions of all elements, including size, padding, margin and corner radius.

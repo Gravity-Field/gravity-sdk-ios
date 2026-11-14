@@ -1277,7 +1277,9 @@ public class GravitySDK {
         let action = onClickModel.action
         let closeOnClick = onClickModel.closeOnClick
 
-        if !(closeTrackedOnDismiss && action == .close && content.variables?.onClose?.action == .close) {
+        let tracksCloseOnDismiss = closeTrackedOnDismiss || (dismissCallback != nil
+            && [.modal, .bottomSheet, .fullScreen].contains(content.deliveryMethod))
+        if !(tracksCloseOnDismiss && action == .close && content.variables?.onClose?.action == .close) {
             trackEngagementEvent(action, content.events)
         }
 
