@@ -753,9 +753,10 @@ public class GravitySDK {
         reservation: InAppPresentationGate.Reservation? = nil,
         contentIds: [String] = [],
         impressionSession: ModalImpressionSession? = nil,
-        item: Item? = nil
+        item: Item? = nil,
+        isValid: () -> Bool = { true }
     ) async -> Bool {
-        guard canPresent(viewController, revision: revision) else { return false }
+        guard isValid(), canPresent(viewController, revision: revision) else { return false }
 
         guard let prepared = await Self.resolvedContent(content, campaign, preparation: inAppPreparation) else {
             GravityLogger.i(prefix: Self.TAG, "In-app preparation skipped content \(content.contentId)")
@@ -763,7 +764,7 @@ public class GravitySDK {
         }
 
         // Revalidate on the UI actor immediately before presenting, after the asynchronous work.
-        guard canPresent(viewController, revision: revision) else { return false }
+        guard isValid(), canPresent(viewController, revision: revision) else { return false }
         if let reservation {
             guard !viewController.isBeingPresented,
                   prepared.deliveryMethod == .snackBar || viewController.presentedViewController == nil else { return false }
@@ -995,8 +996,10 @@ public class GravitySDK {
         item: Item? = nil
     ) {
         weak var presentedController: UIViewController?
+        // The next step continues this showing: replacing the current step is not a close.
+        var replacedByStep = false
         let presentation = registerInApp(content, campaign, impressionSession: impressionSession,
-            shouldTrackClose: { impressionSession.hasFired }) { complete in
+            shouldTrackClose: { impressionSession.hasFired && !replacedByStep }) { complete in
             guard let controller = presentedController, controller.presentingViewController != nil else {
                 complete(false); return
             }
@@ -1017,6 +1020,13 @@ public class GravitySDK {
                     campaign: campaign,
                     viewController: viewController,
                     impressionSession: impressionSession,
+                    dismissForStep: { complete in
+                        replacedByStep = true
+                        presentation.close { closed in
+                            if !closed { replacedByStep = false }
+                            complete(closed)
+                        }
+                    },
                     dismissCallback: dismiss
                 )
             },
@@ -1039,8 +1049,10 @@ public class GravitySDK {
         item: Item? = nil
     ) {
         weak var presentedController: UIViewController?
+        // The next step continues this showing: replacing the current step is not a close.
+        var replacedByStep = false
         let presentation = registerInApp(content, campaign, impressionSession: impressionSession,
-            shouldTrackClose: { impressionSession.hasFired }) { complete in
+            shouldTrackClose: { impressionSession.hasFired && !replacedByStep }) { complete in
             guard let controller = presentedController, controller.presentingViewController != nil else {
                 complete(false); return
             }
@@ -1061,6 +1073,13 @@ public class GravitySDK {
                     campaign: campaign,
                     viewController: viewController,
                     impressionSession: impressionSession,
+                    dismissForStep: { complete in
+                        replacedByStep = true
+                        presentation.close { closed in
+                            if !closed { replacedByStep = false }
+                            complete(closed)
+                        }
+                    },
                     dismissCallback: dismiss
                 )
             },
@@ -1089,8 +1108,10 @@ public class GravitySDK {
         weak var presentedController: UIViewController?
         var animationFinished = false
         var pendingCompletion: ((Bool) -> Void)?
+        // The next step continues this showing: replacing the current step is not a close.
+        var replacedByStep = false
         let presentation = registerInApp(content, campaign, impressionSession: impressionSession,
-            shouldTrackClose: { impressionSession.hasFired }) { complete in
+            shouldTrackClose: { impressionSession.hasFired && !replacedByStep }) { complete in
             guard let controller = presentedController, controller.presentingViewController != nil else {
                 complete(false); return
             }
@@ -1128,6 +1149,13 @@ public class GravitySDK {
                     campaign: campaign,
                     viewController: viewController,
                     impressionSession: impressionSession,
+                    dismissForStep: { complete in
+                        replacedByStep = true
+                        presentation.close { closed in
+                            if !closed { replacedByStep = false }
+                            complete(closed)
+                        }
+                    },
                     dismissCallback: { presentation.close() }
                 )
             },
@@ -1226,6 +1254,7 @@ public class GravitySDK {
         viewController: UIViewController,
         impressionSession: ModalImpressionSession? = nil,
         closeTrackedOnDismiss: Bool = false,
+        dismissForStep: ((@escaping (Bool) -> Void) -> Void)? = nil,
         dismissCallback: (() -> Void)? = nil
     ) {
         let action = onClickModel.action
@@ -1235,7 +1264,7 @@ public class GravitySDK {
             trackEngagementEvent(action, content.events)
         }
 
-        if action != .close && closeOnClick {
+        if action != .close && closeOnClick && !(action == .openStep && dismissForStep != nil) {
             dismissCallback?()
         }
 
@@ -1316,7 +1345,10 @@ public class GravitySDK {
                 let targetContent = campaign.payload.first?.contents.first(
                     where: { $0.step == nextStep }
                 )
-            else { return }
+            else {
+                if closeOnClick, dismissForStep != nil { dismissCallback?() }
+                return
+            }
 
             let item: Item?
             if let itemId = onClickModel.itemId {
@@ -1326,6 +1358,7 @@ public class GravitySDK {
             }
 
             if isPresentationLocked {
+                if closeOnClick, dismissForStep != nil { dismissCallback?() }
                 GravityLogger.i(
                     prefix: Self.TAG,
                     "Presentation is locked, skipped content for campaign \(campaign.payload.first?.campaignId ?? "unknown")"
@@ -1335,6 +1368,29 @@ public class GravitySDK {
 
             let revision = presentationRevision.current
             Task { @MainActor in
+                if let dismissForStep {
+                    // The next step always replaces the current modal, fullscreen or sheet,
+                    // whatever closeOnClick says. The sheet closes asynchronously before UIKit removes its host.
+                    // Keep the opening session, but never present from a stale transition.
+                    var interrupted = UIApplication.shared.applicationState != .active
+                    let observer = NotificationCenter.default.addObserver(
+                        forName: UIApplication.willResignActiveNotification, object: nil, queue: .main
+                    ) { _ in interrupted = true }
+                    defer { NotificationCenter.default.removeObserver(observer) }
+                    let dismissed = await withCheckedContinuation { continuation in
+                        dismissForStep { continuation.resume(returning: $0) }
+                    }
+                    guard dismissed, viewController.presentedViewController == nil else { return }
+                    await self.prepareAndShowBackendContent(
+                        viewController, targetContent, campaign, revision: revision,
+                        impressionSession: impressionSession, item: item,
+                        isValid: {
+                            !interrupted && UIApplication.shared.applicationState == .active
+                                && (impressionSession?.isValid ?? true)
+                        }
+                    )
+                    return
+                }
                 await self.prepareAndShowBackendContent(
                     viewController,
                     targetContent,
