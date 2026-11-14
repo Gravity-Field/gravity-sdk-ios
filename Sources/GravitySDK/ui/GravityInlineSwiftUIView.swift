@@ -7,27 +7,35 @@ private final class PresentingViewControllerHolder {
 
 private final class InlinePageContextHolder {
     var latest: PageContext?
+    /// Set once rules change; onChange actions see the previous view's properties.
+    var latestRules: [RtRule]??
 }
 
 public struct GravityInlineSwiftUIView: View {
     let selector: String
     let pageContext: PageContext
     let loader: AnyView?
+    let rules: [RtRule]?
 
-    public init(selector: String, pageContext: PageContext) {
+    /// - Parameter rules: Recommendation rules sent with the content request, for
+    ///   example the catalog filters the user applied. Changing them reloads the content.
+    public init(selector: String, pageContext: PageContext, rules: [RtRule]? = nil) {
         self.selector = selector
         self.pageContext = pageContext
         self.loader = nil
+        self.rules = rules
     }
 
     public init<Loader: View>(
         selector: String,
         pageContext: PageContext,
+        rules: [RtRule]? = nil,
         @ViewBuilder loader: () -> Loader
     ) {
         self.selector = selector
         self.pageContext = pageContext
         self.loader = AnyView(loader())
+        self.rules = rules
     }
 
     @StateObject private var contentState = InlineContentState<Campaign>()
@@ -139,6 +147,11 @@ public struct GravityInlineSwiftUIView: View {
             contentState.clear()
             loadContent()
         }
+        .onChange(of: rules) { newRules in
+            pageContextHolder.latestRules = .some(newRules)
+            contentState.clear()
+            loadContent()
+        }
         .background(
             ViewControllerResolver { viewController in
                 presentingViewControllerHolder.viewController = viewController
@@ -149,8 +162,10 @@ public struct GravityInlineSwiftUIView: View {
     private func loadContent() {
         guard let load = contentState.begin() else { return }
         let sdk = GravitySDK.instance
+        let rules = pageContextHolder.latestRules ?? self.rules
         Task {
-            let result = await sdk.getContentBySelector(selector: selector, pageContext: pageContextHolder.latest ?? pageContext)
+            let result = await sdk.getContentBySelector(
+                selector: selector, pageContext: pageContextHolder.latest ?? pageContext, rules: rules)
             await MainActor.run {
                 let campaign = result?.data.first
                 let content = campaign?.payload.first?.contents.firstByStep()

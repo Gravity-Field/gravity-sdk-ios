@@ -22,9 +22,17 @@ public class GravityInlineListView: UIView {
         setupConstraints()
     }
 
-    public convenience init(groupSelector: String) {
+    /// Recommendation rules sent with this placement's content request, for example
+    /// the catalog filters the user applied. Changing them reloads the content.
+    public var rules: [RtRule]? {
+        get { pageContextProvider.rules }
+        set { pageContextProvider.provide(rules: newValue) }
+    }
+
+    public convenience init(groupSelector: String, rules: [RtRule]? = nil) {
         self.init(frame: .zero)
         self.groupSelector = groupSelector
+        self.rules = rules
     }
 
     public func initialize(pageContext: PageContext) {
@@ -141,26 +149,36 @@ private struct GravityInlineListContentView: View {
         .background(InlinePlacementLifecycle(onMount: {
             contentState.appear()
             if let pageContext = pageContextProvider.pageContext {
-                loadContent(pageContext: pageContext)
+                loadContent(pageContext: pageContext, rules: pageContextProvider.rules)
             }
         }, onUnmount: { contentState.disappear() }))
         .onReceive(pageContextProvider.$pageContext.dropFirst()) { newContext in
             if let pageContext = newContext {
                 contentState.pageContextChanged()
-                loadContent(pageContext: pageContext)
+                loadContent(pageContext: pageContext, rules: pageContextProvider.rules)
+            }
+        }
+        .onReceive(pageContextProvider.$rules.dropFirst()) { newRules in
+            // New filters make the shown content stale, unlike a new page context.
+            // Published emits before the property changes, so use the emitted value.
+            contentState.clear()
+            if let pageContext = pageContextProvider.pageContext {
+                loadContent(pageContext: pageContext, rules: newRules)
             }
         }
     }
 
-    private func loadContent(pageContext: PageContext) {
+    private func loadContent(pageContext: PageContext, rules: [RtRule]?) {
         guard let load = contentState.begin() else { return }
         let sdk = GravitySDK.instance
         Task {
-            let result = await sdk.getContentByGroupSelector(groupSelector: groupSelector, pageContext: pageContext)
+            let result = await sdk.getContentByGroupSelector(
+                groupSelector: groupSelector, pageContext: pageContext, rules: rules)
             await MainActor.run {
                 guard let result else {
                     if contentState.complete(load, value: nil, height: 0) {
-                        loadContent(pageContext: pageContextProvider.pageContext ?? pageContext)
+                        loadContent(pageContext: pageContextProvider.pageContext ?? pageContext,
+                                rules: pageContextProvider.rules)
                     }
                     return
                 }
@@ -174,7 +192,8 @@ private struct GravityInlineListContentView: View {
                     $0.content.variables?.frameUI?.container.style?.size?.height
                 }.max()
                 if contentState.complete(load, value: contentItems.isEmpty ? nil : contentItems, height: CGFloat(maxHeight ?? 0)) {
-                    loadContent(pageContext: pageContextProvider.pageContext ?? pageContext)
+                    loadContent(pageContext: pageContextProvider.pageContext ?? pageContext,
+                                rules: pageContextProvider.rules)
                 }
             }
         }

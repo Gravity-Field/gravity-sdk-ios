@@ -8,6 +8,7 @@
 ### Choose requests
 
 - Send content settings under `option` in all choose requests.
+- Add recommendation rules (`RtRule`, `RtRuleCondition`, `RtRuleArgument`) as an optional `rules` parameter of `getContentBySelector`, `getContentByCampaignId`, `getContentByGroupSelector`, their `WithDetails` variants and the inline placements, sent in the request item's `rules` field as in Flutter; changing `rules` on a placement reloads its content.
 
 ### Error reports
 

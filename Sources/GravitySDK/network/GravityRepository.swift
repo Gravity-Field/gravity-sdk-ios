@@ -136,7 +136,8 @@ internal class GravityRepository {
         contentSettings: ContentSettings,
         customerUser: User? = nil,
         pageContext: PageContext,
-        identityGeneration: UInt64? = nil
+        identityGeneration: UInt64? = nil,
+        rules: [RtRule]? = nil
     ) async -> GravityDataResponse<ContentResponse>? {
         do {
             let identityRequest = try await sessionManager.beginRequest(
@@ -148,7 +149,8 @@ internal class GravityRepository {
                 data: [
                     ByCampaignIdData(
                         campaignId: campaignId,
-                        options: contentSettings
+                        options: contentSettings,
+                        rules: rules
                     )
                 ],
                 user: identityRequest.user,
@@ -181,7 +183,8 @@ internal class GravityRepository {
         contentSettings: ContentSettings,
         customerUser: User? = nil,
         pageContext: PageContext,
-        identityGeneration: UInt64? = nil
+        identityGeneration: UInt64? = nil,
+        rules: [RtRule]? = nil
     ) async -> GravityDataResponse<ContentResponse>? {
         do {
             let identityRequest = try await sessionManager.beginRequest(
@@ -193,7 +196,8 @@ internal class GravityRepository {
                 data: [
                     BySelectorData(
                         selector: selector,
-                        options: contentSettings
+                        options: contentSettings,
+                        rules: rules
                     )
                 ],
                 user: identityRequest.user,
@@ -226,7 +230,8 @@ internal class GravityRepository {
         contentSettings: ContentSettings,
         customerUser: User? = nil,
         pageContext: PageContext,
-        identityGeneration: UInt64? = nil
+        identityGeneration: UInt64? = nil,
+        rules: [RtRule]? = nil
     ) async -> ContentResponse? {
         do {
             let identityRequest = try await sessionManager.beginRequest(
@@ -238,7 +243,8 @@ internal class GravityRepository {
                 data: [
                     ByGroupData(
                         group: group,
-                        options: contentSettings
+                        options: contentSettings,
+                        rules: rules
                     )
                 ],
                 user: identityRequest.user,
@@ -558,30 +564,36 @@ internal class GravityRepository {
     private struct ByCampaignIdData: ContentRequestData {
         let campaignId: String
         let options: ContentSettings
+        let rules: [RtRule]?
 
         enum CodingKeys: String, CodingKey {
             case campaignId
             case options = "option"
+            case rules
         }
     }
 
     private struct BySelectorData: ContentRequestData {
         let selector: String
         let options: ContentSettings
+        let rules: [RtRule]?
 
         enum CodingKeys: String, CodingKey {
             case selector
             case options = "option"
+            case rules
         }
     }
 
     private struct ByGroupData: ContentRequestData {
         let group: String
         let options: ContentSettings
+        let rules: [RtRule]?
 
         enum CodingKeys: String, CodingKey {
             case group
             case options = "option"
+            case rules
         }
     }
 }
