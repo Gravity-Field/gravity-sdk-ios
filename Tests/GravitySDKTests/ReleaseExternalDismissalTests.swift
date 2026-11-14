@@ -16,11 +16,13 @@ final class ReleaseExternalDismissalTests: XCTestCase {
             window.rootViewController = host
             window.makeKeyAndVisible()
             defer { window.isHidden = true; window.rootViewController = nil }
-            XCTAssertTrue(sdk.showBackendContent(host, content, Campaign()))
+            let opening = sdk.makeModalImpressionSession(content, Campaign())
+            XCTAssertTrue(sdk.showBackendContent(host, content, Campaign(), impressionSession: opening))
             let presented = try XCTUnwrap(host.presentedViewController)
             // Drive the real hosting-controller lifecycle deterministically;
             // unhosted XCTest cannot complete UIKit presentation transitions.
             presented.viewDidAppear(false)
+            opening.confirmFrame(isActive: true)
             presented.viewDidDisappear(false)
             presented.viewDidDisappear(false)
             await fulfillment(of: [closed], timeout: 0.3)

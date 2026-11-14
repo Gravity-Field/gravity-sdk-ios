@@ -24,6 +24,7 @@
 
 - Ignore non-finite dimensions in server styles to prevent invalid layout and product-row rendering crashes.
 - Parse legacy `gridColumns` as numeric or `px` dimensions, validating 1–12 before truncating fractional values.
+- Omit modal, fullscreen and bottom-sheet close tracking before the first confirmed content frame, including external UIKit removal; missing WRIMP URLs do not suppress an appeared close.
 - Track modal, fullscreen and bottom-sheet close once when their UIKit host is removed outside `dismissInApp`, preserving SDK dismissal completions.
 - Add product grids with public `GridSettings`, `Style.gridSettings` and a `gridSettings` parameter in `Style.init`; fall back to legacy `gridColumns`, with 2 columns and spacing 8 by default.
 - Render square grid cards with `style.padding` and 1–12 columns; invalid settings fall back to valid `gridColumns`, otherwise 2.

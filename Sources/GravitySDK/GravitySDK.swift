@@ -995,7 +995,8 @@ public class GravitySDK {
         item: Item? = nil
     ) {
         weak var presentedController: UIViewController?
-        let presentation = registerInApp(content, campaign, impressionSession: impressionSession) { complete in
+        let presentation = registerInApp(content, campaign, impressionSession: impressionSession,
+            shouldTrackClose: { impressionSession.hasFired }) { complete in
             guard let controller = presentedController, controller.presentingViewController != nil else {
                 complete(false); return
             }
@@ -1038,7 +1039,8 @@ public class GravitySDK {
         item: Item? = nil
     ) {
         weak var presentedController: UIViewController?
-        let presentation = registerInApp(content, campaign, impressionSession: impressionSession) { complete in
+        let presentation = registerInApp(content, campaign, impressionSession: impressionSession,
+            shouldTrackClose: { impressionSession.hasFired }) { complete in
             guard let controller = presentedController, controller.presentingViewController != nil else {
                 complete(false); return
             }
@@ -1087,7 +1089,8 @@ public class GravitySDK {
         weak var presentedController: UIViewController?
         var animationFinished = false
         var pendingCompletion: ((Bool) -> Void)?
-        let presentation = registerInApp(content, campaign, impressionSession: impressionSession) { complete in
+        let presentation = registerInApp(content, campaign, impressionSession: impressionSession,
+            shouldTrackClose: { impressionSession.hasFired }) { complete in
             guard let controller = presentedController, controller.presentingViewController != nil else {
                 complete(false); return
             }
