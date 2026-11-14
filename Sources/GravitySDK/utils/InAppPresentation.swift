@@ -17,6 +17,15 @@ internal final class InAppPresentation {
         self.didDismiss = didDismiss
     }
 
+    /// UIKit may remove the host without invoking an SDK close action.
+    func removedExternally() {
+        guard result == nil, !isClosing else { return }
+        isClosing = true
+        willClose()
+        result = true
+        didDismiss(true)
+    }
+
     func close(completion: @escaping (Bool) -> Void = { _ in }) {
         guard result == nil, !isClosing else { completion(false); return }
         isClosing = true
@@ -56,3 +65,28 @@ internal final class InAppPresentationRegistry {
         presentation.close(completion: completion)
     }
 }
+
+#if canImport(UIKit)
+import UIKit
+import SwiftUI
+
+/// Observes host removal while leaving SDK-owned dismissal completion in charge.
+internal final class InAppHostingController<Content: View>: UIHostingController<Content> {
+    var onExternalRemoval: (() -> Void)?
+    private var hasAppeared = false
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        hasAppeared = true
+    }
+
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        guard hasAppeared else { return }
+        if isBeingDismissed || presentingViewController == nil
+            || (presentedViewController == nil && viewIfLoaded?.window == nil) {
+            onExternalRemoval?()
+        }
+    }
+}
+#endif

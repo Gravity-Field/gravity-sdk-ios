@@ -39,4 +39,30 @@ final class InAppPresentationTests: XCTestCase {
         registry.remove(old, contentId: "same")
         registry.dismiss(contentId: "same") { XCTAssertTrue($0) }
     }
+
+    func testExternalRemovalFinishesOnceWithoutRequestingAnotherDismissal() {
+        var events: [String] = []
+        let presentation = InAppPresentation(willClose: { events.append("visible") },
+            performDismiss: { _ in XCTFail("The controller has already been removed") },
+            didDismiss: { success in XCTAssertTrue(success); events.append("close") })
+        presentation.removedExternally()
+        presentation.removedExternally()
+        presentation.close { XCTAssertFalse($0) }
+        XCTAssertEqual(events, ["visible", "close"])
+    }
+
+    func testLifecycleDuringSDKDismissalPreservesCompletionAndOneClose() {
+        var finish: ((Bool) -> Void)?
+        var closes = 0
+        var completions = 0
+        let presentation = InAppPresentation(performDismiss: { finish = $0 }, didDismiss: { _ in closes += 1 })
+        presentation.close { success in XCTAssertTrue(success); completions += 1 }
+        presentation.removedExternally()
+        XCTAssertEqual(closes, 0)
+        finish?(true)
+        presentation.removedExternally()
+        XCTAssertEqual(closes, 1)
+        XCTAssertEqual(completions, 1)
+    }
+
 }
