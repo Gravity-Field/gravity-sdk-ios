@@ -54,7 +54,7 @@ extension SDKSingletonTests {
             let requests = messages.values.filter { $0.contains("REQUEST:") }
             #expect(requests.count == 3)
             for message in requests {
-                #expect(message.contains("Authorization: Bearer ***"))
+                #expect(!message.contains("Authorization"))
                 #expect(!message.contains(fixture.apiKey))
             }
         }

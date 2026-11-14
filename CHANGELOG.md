@@ -11,6 +11,7 @@
 
 ### Error reports
 
+- Keep HTTP diagnostics to method, sanitized endpoint and status; omit request and response bodies and header values.
 - Redact complete Authorization, Proxy-Authorization and X-Authorization values to the end of the line in free-text messages, stack traces and diagnostic fields; preserve following lines.
 - Require valid IPv6 address syntax before exempting bracketed endpoints from credential redaction.
 - Redact JSON and partially encoded slash forms and malformed credential ports; deduplicate sanitized diagnostics with stable transport codes and endpoints.
