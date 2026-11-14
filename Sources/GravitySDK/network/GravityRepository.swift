@@ -445,85 +445,14 @@ internal class GravityRepository {
         return (data, httpResponse)
     }
 
-    private func safeDiagnosticHeader(key: String, value: String) -> String {
-        let name = key.lowercased()
-        if name == "authorization" { return "Bearer ***" }
-        if ["proxy-authorization", "cookie", "set-cookie", "x-api-key"].contains(name) { return "***" }
-        return ReportSanitizer.sanitizeText(value, limit: 1000)
-    }
-
     private func logHttpRequest(request: URLRequest) {
-        let url = request.url
-        let method = request.httpMethod
-        let bodyData = request.httpBody
-        
-        var logMessage = "REQUEST: \(ReportSanitizer.sanitizeUrls(url?.absoluteString ?? "nil"))\n"
-        logMessage += "METHOD: \(method ?? "nil")\n"
-
-        logMessage += "COMMON HEADERS\n"
-        if let headers = request.allHTTPHeaderFields {
-            let sortedKeys = headers.keys.sorted { $0.lowercased() < $1.lowercased() }
-            for key in sortedKeys {
-                if let value = headers[key] {
-                    let loggedValue = safeDiagnosticHeader(key: key, value: value)
-                    logMessage += "-> \(key): \(loggedValue)\n"
-                }
-            }
-        }
-
-        logMessage += "CONTENT HEADERS\n"
-        if let headers = request.allHTTPHeaderFields {
-            if let contentType = headers["Content-Type"] {
-                logMessage += "-> Content-Type: \(contentType)\n"
-            }
-            if let contentLength = bodyData?.count {
-                logMessage += "-> Content-Length: \(contentLength)\n"
-            }
-        }
-
-        if let bodyData = bodyData {
-            if let jsonString = String(data: bodyData, encoding: .utf8) {
-                let contentType = request.allHTTPHeaderFields?["Content-Type"] ?? "nil"
-                logMessage += "BODY Content-Type: \(contentType)\n"
-                logMessage += "BODY START\n"
-                logMessage += "\(ReportSanitizer.sanitizeText(jsonString, limit: 5000))\n"
-                logMessage += "BODY END"
-            } else {
-                logMessage += "BODY Content-Type: application/json\n"
-                logMessage += "BODY START\n"
-                logMessage += "[non-UTF8 data]\n"
-                logMessage += "BODY END"
-            }
-        } else {
-            logMessage += "BODY: [empty]"
-        }
-
-        GravityLogger.d(prefix: "HTTP", logMessage)
+        let endpoint = ReportSanitizer.sanitizeUrls(request.url?.absoluteString ?? "nil")
+        GravityLogger.d(prefix: "HTTP", "REQUEST: \(endpoint)\nMETHOD: \(request.httpMethod ?? "nil")")
     }
 
     private func logHttpResponse(response: HTTPURLResponse, data: Data, method: String) {
-        var logMessage = "RESPONSE: \(response.statusCode) \(HTTPURLResponse.localizedString(forStatusCode: response.statusCode))\n"
-        logMessage += "METHOD: \(method)\n"
-        logMessage += "FROM: \(ReportSanitizer.sanitizeUrls(response.url?.absoluteString ?? "nil"))\n"
-        
-        logMessage += "COMMON HEADERS\n"
-        for (key, value) in response.allHeaderFields {
-            logMessage += "-> \(key): \(safeDiagnosticHeader(key: String(describing: key), value: String(describing: value)))\n"
-        }
-        
-        if !(200...299).contains(response.statusCode) {
-            logMessage += "BODY: [omitted for HTTP failure; \(data.count) bytes]"
-        } else if let jsonString = String(data: data, encoding: .utf8) {
-            let contentType = response.allHeaderFields["Content-Type"] as? String ?? "nil"
-            logMessage += "BODY Content-Type: \(contentType)\n"
-            logMessage += "BODY START\n"
-            logMessage += "\(ReportSanitizer.sanitizeText(jsonString, limit: 5000))\n"
-            logMessage += "BODY END"
-        } else {
-            logMessage += "BODY: [empty or non-UTF8]"
-        }
-        
-        GravityLogger.d(prefix: "HTTP", logMessage)
+        let endpoint = ReportSanitizer.sanitizeUrls(response.url?.absoluteString ?? "nil")
+        GravityLogger.d(prefix: "HTTP", "RESPONSE: \(response.statusCode)\nMETHOD: \(method)\nFROM: \(endpoint)")
     }
 
     private struct VisitRequest: Encodable {
