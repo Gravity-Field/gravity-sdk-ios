@@ -42,7 +42,7 @@ https://github.com/Gravity-Field/gravity-sdk-ios.git
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/Gravity-Field/gravity-sdk-ios.git", from: "1.2.0")
+    .package(url: "https://github.com/Gravity-Field/gravity-sdk-ios.git", from: "1.3.0")
 ]
 ```
 

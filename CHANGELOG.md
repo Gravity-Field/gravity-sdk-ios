@@ -2,7 +2,8 @@
 
 ## Unreleased
 
-- Avoid iOS 17 crashes on extreme campaign priority and delay exponents by decoding raw JSON numbers with binary precision.
+## 1.3.0
+
 - Expose the chosen campaign’s `delayTime` in NoShow responses and load callbacks for host-owned waiting and rendering; accept fractional numbers and numeric strings (truncated toward zero; decimal strings retain exact precision) for campaign priorities and delays; invalid values are ignored and no longer fail the whole /visit or /event response.
 - Prevent auto-show crashes on negative or very large integer campaign delays; negative delays mean no wait and large delays saturate to the maximum supported sleep; delayed auto-show stops when the screen, user or presentation lock changes, releasing its reservation.
 
@@ -15,26 +16,22 @@
 
 - Keep HTTP diagnostics to method, sanitized endpoint and status; omit request and response bodies and header values.
 - Redact complete Authorization, Proxy-Authorization and X-Authorization values to the end of the line in free-text messages, stack traces and diagnostic fields; preserve following lines.
-- Require valid IPv6 address syntax before exempting bracketed endpoints from credential redaction.
-- Redact JSON and partially encoded slash forms and malformed credential ports; deduplicate sanitized diagnostics with stable transport codes and endpoints.
-- Strip credentials from generic URL schemes and URLs nested after opaque prefixes while preserving following prose.
-- Keep surrounding diagnostics and endpoint paths while stripping secrets from all URL schemes, malformed credentials and escaped URLs in linear passes.
+- Keep surrounding diagnostics and useful encoded endpoint paths while stripping URL credentials, queries and fragments from generic schemes, URLs nested after opaque prefixes, JSON/partially encoded slash forms and malformed credential ports in linear passes; preserve following prose and exempt only syntactically valid bracketed IPv6 addresses.
+- Deduplicate sanitized diagnostics with stable transport codes and endpoints.
 - Bound backend error reports to ten attempts per rolling minute and suppress identical message/stack reports for a minute after successful delivery; allow failed sends to retry within the budget.
-- Preserve useful encoded endpoint paths in diagnostics while redacting URL credentials, queries and sensitive headers; omit HTTP failure bodies from debug logs.
-- Keep error reports usable before session initialization, preserve the current device identity, sanitize URL credentials and queries, and redact authorization in request logs.
+- Keep error reports usable before session initialization and preserve the current device identity.
 
 ### Products grid and presentation
 
-- Ignore non-finite dimensions in server styles to prevent invalid layout and product-row rendering crashes.
-- Parse legacy `gridColumns` as numeric or `px` dimensions, validating 1–12 before truncating fractional values.
 - Send modal, fullscreen and bottom-sheet impressions once per showing, including when the host covers and uncovers the view.
 - Wait for modal dismissal before opening the next step; cancel stale transitions when the user, presentation state or foreground activity changes.
 - Replace the current modal, fullscreen or bottom sheet with the next `open_step` step regardless of `closeOnClick`, matching Flutter; the replaced step sends no close, the showing keeps one visible impression, and one close is tracked when the last step closes.
-- Omit modal, fullscreen and bottom-sheet close tracking before the first confirmed content frame, including external UIKit removal; missing WRIMP URLs do not suppress an appeared close.
+- Ignore non-finite dimensions in server styles to prevent invalid layout and product-row rendering crashes.
+- Send close tracking once when modal, fullscreen or bottom-sheet close buttons also trigger the configured dismissal action.
+- Omit modal, fullscreen and bottom-sheet close tracking before the first confirmed content frame, including external UIKit removal.
 - Track modal, fullscreen and bottom-sheet close once when their UIKit host is removed outside `dismissInApp`, preserving SDK dismissal completions.
 - Present a different campaign above an open modal, fullscreen or bottom sheet instead of skipping it; a new opening of a campaign whose in-app is still open is skipped, and `dismissInApp` for a lower in-app also closes those stacked above it, tracking each close once.
-- Send close tracking once when modal, fullscreen or bottom-sheet close buttons also trigger the configured dismissal action.
-- Add product grids with public `GridSettings`, `Style.gridSettings` and a `gridSettings` parameter in `Style.init`; fall back to legacy `gridColumns`, with 2 columns and spacing 8 by default.
+- Add product grids with public `GridSettings`, `Style.gridSettings` and a `gridSettings` parameter in `Style.init`; fall back to legacy `gridColumns` parsed as numeric or `px` dimensions, validating 1–12 before truncating fractional values; use 2 columns and spacing 8 by default.
 - Render square grid cards with `style.padding` and 1–12 columns; invalid settings fall back to valid `gridColumns`, otherwise 2.
 - Accept numeric and `px` strings for dimensions of all elements, including size, padding, margin and corner radius.
 - Send grid product impressions once per slot after at least half of the card is visible inside the scroll viewport.
