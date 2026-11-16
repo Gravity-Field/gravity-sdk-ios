@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.3.1
+
 - Show one in-app at a time: automatic presentation skips a modal, fullscreen or bottom sheet while another controller is presented over the screen, as in 1.2.0, and skips a snackbar while a controller is presented or any SDK in-app is open; a visible snackbar does not block a modal, fullscreen or bottom sheet.
 
 ## 1.3.0
