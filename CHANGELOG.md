@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Show one in-app at a time: automatic presentation skips a modal, fullscreen or bottom sheet while another controller is presented over the screen, as in 1.2.0, and skips a snackbar while a controller is presented or any SDK in-app is open; a visible snackbar does not block a modal, fullscreen or bottom sheet.
+
 ## 1.3.0
 
 - Expose the chosen campaign’s `delayTime` in NoShow responses and load callbacks for host-owned waiting and rendering; accept fractional numbers and numeric strings (truncated toward zero; decimal strings retain exact precision) for campaign priorities and delays; invalid values are ignored and no longer fail the whole /visit or /event response.

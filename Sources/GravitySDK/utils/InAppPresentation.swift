@@ -43,28 +43,17 @@ internal final class InAppPresentation {
 internal final class InAppPresentationRegistry {
     private final class Entry {
         weak var presentation: InAppPresentation?
-        let campaignId: String?
-        init(_ presentation: InAppPresentation, campaignId: String?) {
-            self.presentation = presentation
-            self.campaignId = campaignId
-        }
+        init(_ presentation: InAppPresentation) { self.presentation = presentation }
     }
     private var entries: [String: Entry] = [:]
 
-    /// True while this content is mounted, until its dismissal completes.
-    func contains(contentId: String) -> Bool {
-        entries[contentId]?.presentation != nil
-    }
-
-    /// True while any content of this campaign is mounted, until its dismissal completes.
-    func containsCampaign(_ campaignId: String) -> Bool {
-        entries.values.contains { $0.campaignId == campaignId && $0.presentation != nil }
-    }
-
-    func register(_ presentation: InAppPresentation, contentId: String, campaignId: String? = nil) {
+    func register(_ presentation: InAppPresentation, contentId: String) {
         entries = entries.filter { $0.value.presentation != nil }
-        entries[contentId] = Entry(presentation, campaignId: campaignId)
+        entries[contentId] = Entry(presentation)
     }
+
+    /// Any SDK in-app, including a snackbar, is still open.
+    var containsOpen: Bool { entries.values.contains { $0.presentation?.isOpen == true } }
 
     func remove(_ presentation: InAppPresentation?, contentId: String) {
         if entries[contentId]?.presentation === presentation { entries.removeValue(forKey: contentId) }
@@ -84,11 +73,8 @@ internal final class InAppPresentationRegistry {
 import UIKit
 import SwiftUI
 
-/// Marks a controller that hosts an SDK modal, fullscreen or bottom sheet.
-internal protocol GravityInAppHost: UIViewController {}
-
 /// Observes host removal while leaving SDK-owned dismissal completion in charge.
-internal final class InAppHostingController<Content: View>: UIHostingController<Content>, GravityInAppHost {
+internal final class InAppHostingController<Content: View>: UIHostingController<Content> {
     var onExternalRemoval: (() -> Void)?
     private var hasAppeared = false
 

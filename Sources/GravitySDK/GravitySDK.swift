@@ -732,7 +732,7 @@ public class GravitySDK {
             }
 
             guard let targetViewController,
-                  await isPresentationTargetActive(targetViewController) else {
+                  await isViewControllerActive(targetViewController) else {
                 return
             }
 
@@ -774,8 +774,10 @@ public class GravitySDK {
         // Revalidate on the UI actor immediately before presenting, after the asynchronous work.
         guard isValid(), canPresent(viewController, revision: revision) else { return false }
         if let reservation {
-            // showBackendContent picks the presenter above open SDK in-apps of other campaigns.
-            guard !viewController.isBeingPresented else { return false }
+            // One in-app at a time: nothing opens while a controller is presented over the
+            // screen, and a snackbar also waits for any SDK in-app, including a snackbar.
+            guard !viewController.isBeingPresented, viewController.presentedViewController == nil,
+                  prepared.deliveryMethod != .snackBar || !inAppPresentations.containsOpen else { return false }
             return presentationGate.present(reservation, contentIds: contentIds) {
                 self.showBackendContent(viewController, prepared, campaign, impressionSession: impressionSession, item: item)
             }
@@ -798,7 +800,7 @@ public class GravitySDK {
 
     @MainActor private func canPresent(_ viewController: UIViewController, revision: UInt64) -> Bool {
         GravitySDK.instance === self && presentationRevision.canPresent(expected: revision,
-            active: isPresentationTargetActive(viewController), locked: isPresentationLocked,
+            active: isViewControllerActive(viewController), locked: isPresentationLocked,
             cancelled: Task.isCancelled)
     }
 
@@ -880,8 +882,7 @@ public class GravitySDK {
             else { self.presentationGate.closed(contentId: content.contentId) }
         }
         registered = presentation
-        inAppPresentations.register(presentation, contentId: content.contentId,
-                                    campaignId: campaign.payload.first?.campaignId)
+        inAppPresentations.register(presentation, contentId: content.contentId)
         return presentation
     }
 
@@ -969,24 +970,11 @@ public class GravitySDK {
         impressionSession: ModalImpressionSession? = nil,
         item: Item? = nil
     ) -> Bool {
-        // An open window outlasts the gate timeout or WRIMP acknowledgement. A step of
-        // the current opening may follow it, but the same content never mounts twice and
-        // a new opening of a campaign waits until that campaign's in-app is dismissed.
-        if inAppPresentations.contains(contentId: content.contentId) { return false }
-        let isNewOpening = impressionSession == nil
-        if isNewOpening, let campaignId = campaign.payload.first?.campaignId,
-           inAppPresentations.containsCampaign(campaignId) { return false }
-        var presenter = viewController
-        if isNewOpening, content.deliveryMethod != .snackBar {
-            // Other campaigns open above SDK in-apps that are already showing.
-            guard let top = inAppPresenter(over: viewController) else { return false }
-            presenter = top
-        }
         let opening = impressionSession ?? makeModalImpressionSession(content, campaign)
         switch content.deliveryMethod {
-        case .fullScreen: showFullScreen(content, campaign, presenter, impressionSession: opening, item: item)
-        case .modal: showModal(content, campaign, presenter, impressionSession: opening, item: item)
-        case .bottomSheet: showBottomSheet(content, campaign, presenter, impressionSession: opening, item: item)
+        case .fullScreen: showFullScreen(content, campaign, viewController, impressionSession: opening, item: item)
+        case .modal: showModal(content, campaign, viewController, impressionSession: opening, item: item)
+        case .bottomSheet: showBottomSheet(content, campaign, viewController, impressionSession: opening, item: item)
         case .snackBar:
             guard let template = content.templateSystemName, template != .unknown,
                   content.variables?.frameUI != nil, viewController.viewIfLoaded?.window != nil else { return false }
@@ -1027,11 +1015,10 @@ public class GravitySDK {
         var replacedByStep = false
         let presentation = registerInApp(content, campaign, impressionSession: impressionSession,
             shouldTrackClose: { impressionSession.hasFired && !replacedByStep }) { complete in
-            guard let controller = presentedController, let presenter = controller.presentingViewController else {
+            guard let controller = presentedController, controller.presentingViewController != nil else {
                 complete(false); return
             }
-            // Dismissing from the presenter also closes in-apps stacked above this one.
-            presenter.dismiss(animated: true) { complete(true) }
+            controller.dismiss(animated: true) { complete(true) }
         }
         func dismiss() {
             presentation.close()
@@ -1081,11 +1068,10 @@ public class GravitySDK {
         var replacedByStep = false
         let presentation = registerInApp(content, campaign, impressionSession: impressionSession,
             shouldTrackClose: { impressionSession.hasFired && !replacedByStep }) { complete in
-            guard let controller = presentedController, let presenter = controller.presentingViewController else {
+            guard let controller = presentedController, controller.presentingViewController != nil else {
                 complete(false); return
             }
-            // Dismissing from the presenter also closes in-apps stacked above this one.
-            presenter.dismiss(animated: true) { complete(true) }
+            controller.dismiss(animated: true) { complete(true) }
         }
         func dismiss() {
             presentation.close()
@@ -1141,15 +1127,14 @@ public class GravitySDK {
         var replacedByStep = false
         let presentation = registerInApp(content, campaign, impressionSession: impressionSession,
             shouldTrackClose: { impressionSession.hasFired && !replacedByStep }) { complete in
-            guard let controller = presentedController, let presenter = controller.presentingViewController else {
+            guard let controller = presentedController, controller.presentingViewController != nil else {
                 complete(false); return
             }
-            // A covered sheet may never finish its slide-out animation; close it directly.
-            if !animationFinished, controller.presentedViewController == nil, let close = requestClose {
+            if !animationFinished, let close = requestClose {
                 pendingCompletion = complete
                 close()
             } else {
-                presenter.dismiss(animated: false) { complete(true) }
+                controller.dismiss(animated: false) { complete(true) }
             }
         }
 
@@ -1157,10 +1142,10 @@ public class GravitySDK {
             animationFinished = true
             if let complete = pendingCompletion {
                 pendingCompletion = nil
-                guard let controller = presentedController, let presenter = controller.presentingViewController else {
+                guard let controller = presentedController, controller.presentingViewController != nil else {
                     complete(false); return
                 }
-                presenter.dismiss(animated: false) { complete(true) }
+                controller.dismiss(animated: false) { complete(true) }
             } else {
                 // Drag/backdrop dismissal has already finished the sheet animation.
                 presentation.close()
@@ -1462,28 +1447,6 @@ public class GravitySDK {
         viewController.view.window != nil
             && !viewController.isBeingDismissed
             && !viewController.isMovingFromParent
-    }
-
-    /// Presentation target, or an SDK in-app above it, is in a window and not transitioning.
-    @MainActor private func isPresentationTargetActive(_ viewController: UIViewController) -> Bool {
-        if isViewControllerActive(viewController) { return true }
-        // A fullscreen in-app removes the covered target from the window.
-        guard viewController.presentedViewController != nil,
-              let top = inAppPresenter(over: viewController) else { return false }
-        return top !== viewController && isViewControllerActive(top)
-    }
-
-    /// The controller to present a new in-app from: the target itself, or the top SDK
-    /// in-app presented above it. Nil while a host-owned controller covers the target or
-    /// any controller in the chain is still being presented or dismissed.
-    @MainActor private func inAppPresenter(over viewController: UIViewController) -> UIViewController? {
-        var top = viewController
-        while let next = top.presentedViewController {
-            guard next is GravityInAppHost, !next.isBeingDismissed else { return nil }
-            top = next
-        }
-        guard !top.isBeingPresented, !top.isBeingDismissed else { return nil }
-        return top
     }
 
     @MainActor private func getTopViewController() -> UIViewController? {
